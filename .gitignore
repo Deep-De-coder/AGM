@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+dist/
+build/
+*.egg
+.venv/
+venv/
+.env
+.env.*
+!.env.example
+*.log
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Alembic
+alembic/versions/__pycache__/
+agent-memory/alembic/versions/__pycache__/
+
+# agent-memory frontend
+agent-memory/frontend/node_modules/
+agent-memory/frontend/dist/
+agent-memory/frontend/.vite/
+
+# Local MCP / packaging
+agent-memory/agent_memory_mcp.egg-info/
+
+# OS
+.DS_Store
+Thumbs.db

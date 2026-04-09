@@ -3,20 +3,28 @@
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func, select
+import logging
+
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
+from sqlalchemy import exists, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from backend.config import get_settings
 from backend.database import get_db, log_memory_event
-from backend.models import Agent, Memory, MemoryProvenanceLog
+from backend.models import (
+    Agent,
+    Memory,
+    MemoryProvenanceLog,
+    RuleViolation as RuleViolationORM,
+)
 from backend.redis_client import (
     get_redis,
     session_flagged_reads_cache_key,
     session_writes_cache_key,
     trust_cache_key,
 )
+from backend.rules.checker import check_memory_rules
 from backend.schemas import (
     MemoryCreate,
     MemoryCreateResponse,
@@ -29,16 +37,35 @@ from backend.schemas import (
 
 router = APIRouter(prefix="/memories", tags=["memories"])
 settings = get_settings()
+logger = logging.getLogger(__name__)
 
 
-@router.post("", response_model=MemoryCreateResponse, status_code=status.HTTP_201_CREATED)
+async def _run_rule_checks_after_write(memory_id: str) -> None:
+    from backend.database import AsyncSessionLocal
+    from backend.redis_client import get_redis
+    from backend.rules.checker import check_memory_rules
+
+    try:
+        async with AsyncSessionLocal() as session:
+            redis = await get_redis()
+            await check_memory_rules(memory_id, session, redis)
+    except Exception:
+        logger.exception("Background rule check failed for memory_id=%s", memory_id)
+
+
+@router.post(
+    "", response_model=MemoryCreateResponse, status_code=status.HTTP_201_CREATED
+)
 async def create_memory(
+    background_tasks: BackgroundTasks,
     body: MemoryCreate,
     db: AsyncSession = Depends(get_db),
 ) -> MemoryCreateResponse:
     agent_result = await db.execute(select(Agent).where(Agent.id == body.agent_id))
     if agent_result.scalar_one_or_none() is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found"
+        )
 
     memory = Memory(
         content=body.content,
@@ -78,8 +105,11 @@ async def create_memory(
 
     await db.commit()
     await db.refresh(memory)
+    background_tasks.add_task(_run_rule_checks_after_write, str(memory.id))
     return MemoryCreateResponse(
-        memory_id=memory.id, trust_score=memory.trust_score, created_at=memory.created_at
+        memory_id=memory.id,
+        trust_score=memory.trust_score,
+        created_at=memory.created_at,
     )
 
 
@@ -129,6 +159,76 @@ async def list_memories(
     )
 
 
+@router.get("/safe", response_model=list[MemoryListItem])
+async def list_safe_memories(
+    agent_id: uuid.UUID | None = Query(default=None),
+    min_trust_score: float = Query(default=0.6, ge=0.0, le=1.0),
+    exclude_flagged: bool = Query(default=True),
+    limit: int = Query(default=10, ge=1, le=500),
+    db: AsyncSession = Depends(get_db),
+) -> list[MemoryListItem]:
+    """Memories above trust threshold, optionally excluding flagged, with no unacknowledged violations."""
+    unresolved = exists().where(
+        RuleViolationORM.memory_id == Memory.id,
+        RuleViolationORM.is_acknowledged.is_(False),
+    )
+    conditions: list[Any] = [
+        Memory.is_deleted.is_(False),
+        Memory.trust_score >= min_trust_score,
+        ~unresolved,
+    ]
+    if agent_id is not None:
+        conditions.append(Memory.agent_id == agent_id)
+    if exclude_flagged:
+        conditions.append(Memory.is_flagged.is_(False))
+
+    list_result = await db.execute(
+        select(Memory, Agent.name)
+        .join(Agent, Agent.id == Memory.agent_id)
+        .where(*conditions)
+        .order_by(Memory.created_at.desc())
+        .limit(limit)
+    )
+    rows = list_result.all()
+    out: list[MemoryListItem] = []
+    for m, agent_name in rows:
+        item = MemoryListItem.model_validate(m)
+        item.agent_name = agent_name
+        out.append(item)
+    return out
+
+
+@router.post("/{memory_id}/check-rules", status_code=status.HTTP_200_OK)
+async def run_memory_rules_check(
+    memory_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, float | int | bool | list[dict[str, object]]]:
+    result = await db.execute(select(Memory).where(Memory.id == memory_id))
+    memory = result.scalar_one_or_none()
+    if memory is None or memory.is_deleted:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Memory not found"
+        )
+
+    redis = await get_redis()
+    violations = await check_memory_rules(str(memory_id), db, redis)
+    out_list: list[dict[str, object]] = []
+    for v in violations:
+        out_list.append(
+            {
+                "rule_name": v.rule_name,
+                "severity": v.severity,
+                "description": v.description,
+                "detected_at": v.detected_at.isoformat(),
+            }
+        )
+    return {
+        "violations_found": len(violations),
+        "violations": out_list,
+        "all_clear": len(violations) == 0,
+    }
+
+
 @router.get("/{memory_id}/provenance", response_model=list[MemoryProvenanceEvent])
 async def get_memory_provenance(
     memory_id: uuid.UUID,
@@ -137,7 +237,9 @@ async def get_memory_provenance(
     mem_result = await db.execute(select(Memory).where(Memory.id == memory_id))
     memory = mem_result.scalar_one_or_none()
     if memory is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Memory not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Memory not found"
+        )
 
     prov_result = await db.execute(
         select(MemoryProvenanceLog)
@@ -157,7 +259,9 @@ async def flag_memory(
     result = await db.execute(select(Memory).where(Memory.id == memory_id))
     memory = result.scalar_one_or_none()
     if memory is None or memory.is_deleted:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Memory not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Memory not found"
+        )
 
     memory.is_flagged = True
     memory.flag_reason = body.reason
@@ -206,7 +310,9 @@ async def get_memory(
     )
     memory = result.unique().scalar_one_or_none()
     if memory is None or memory.is_deleted:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Memory not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Memory not found"
+        )
 
     await log_memory_event(
         db,
@@ -224,7 +330,9 @@ async def get_memory(
         and reader_session_id is not None
         and memory.is_flagged
     ):
-        fk = session_flagged_reads_cache_key(str(reader_agent_id), str(reader_session_id))
+        fk = session_flagged_reads_cache_key(
+            str(reader_agent_id), str(reader_session_id)
+        )
         c = await redis.incr(fk)
         if c == 1:
             await redis.expire(fk, settings.session_writes_cache_ttl_seconds)
@@ -236,6 +344,7 @@ async def get_memory(
     )
 
     await db.commit()
+    db.expire_all()
 
     reload = await db.execute(
         select(Memory)
@@ -276,7 +385,9 @@ async def delete_memory(
     result = await db.execute(select(Memory).where(Memory.id == memory_id))
     memory = result.scalar_one_or_none()
     if memory is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Memory not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Memory not found"
+        )
     if memory.is_deleted:
         return None
 

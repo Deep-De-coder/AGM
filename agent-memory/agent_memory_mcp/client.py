@@ -16,6 +16,28 @@ class AgentMemoryClientError(Exception):
     """Raised when the AgentMemory API is unreachable or returns an error."""
 
 
+def _detail_to_message(detail: Any) -> str:
+    if isinstance(detail, str):
+        return detail
+    if isinstance(detail, list):
+        parts: list[str] = []
+        for item in detail:
+            if isinstance(item, dict):
+                loc = item.get("loc")
+                loc_s = ".".join(str(x) for x in loc) if loc else ""
+                msg = item.get("msg", "")
+                if loc_s:
+                    parts.append(f"{loc_s}: {msg}")
+                else:
+                    parts.append(str(msg))
+            else:
+                parts.append(str(item))
+        return "; ".join(parts) if parts else str(detail)
+    if isinstance(detail, dict):
+        return str(detail)
+    return str(detail)
+
+
 def _json_safe(value: Any) -> Any:
     if value is None:
         return None
@@ -66,14 +88,15 @@ class AgentMemoryClient:
 
     async def _handle_response(self, response: httpx.Response) -> Any:
         if response.status_code >= 400:
-            detail: Any
             try:
-                detail = response.json()
+                body = response.json()
             except json.JSONDecodeError:
-                detail = response.text
-            raise AgentMemoryClientError(
-                f"AgentMemory API error {response.status_code} at {response.request.url!r}: {detail}"
-            )
+                raise AgentMemoryClientError(response.text or f"HTTP {response.status_code}") from None
+            if isinstance(body, dict) and "detail" in body:
+                msg = _detail_to_message(body["detail"])
+            else:
+                msg = _detail_to_message(body)
+            raise AgentMemoryClientError(msg)
         if response.status_code == 204 or not response.content:
             return None
         try:
@@ -203,3 +226,64 @@ class AgentMemoryClient:
         if agent_id is None:
             raise AgentMemoryClientError("Agent response missing id field")
         return _json_safe({"agent_id": str(agent_id), "name": str(data["name"])})
+
+    async def check_violations(self, memory_id: str) -> list[dict[str, Any]]:
+        data = await self._request("GET", "/violations", params={"memory_id": memory_id})
+        if not isinstance(data, list):
+            raise AgentMemoryClientError("Unexpected response from GET /violations")
+        out: list[dict[str, Any]] = []
+        for row in data:
+            if not isinstance(row, dict):
+                continue
+            out.append(
+                {
+                    "rule_name": str(row.get("rule_name", "")),
+                    "severity": str(row.get("severity", "")),
+                    "description": row.get("description"),
+                    "detected_at": row.get("detected_at"),
+                    "is_acknowledged": bool(row.get("is_acknowledged", False)),
+                }
+            )
+        return _json_safe(out)
+
+    async def get_safe_memories(
+        self,
+        *,
+        agent_id: str | None = None,
+        min_trust_score: float = 0.6,
+        exclude_flagged: bool = True,
+        limit: int = 10,
+    ) -> list[dict[str, Any]]:
+        params: dict[str, Any] = {
+            "min_trust_score": min_trust_score,
+            "exclude_flagged": exclude_flagged,
+            "limit": limit,
+        }
+        if agent_id is not None:
+            params["agent_id"] = agent_id
+        data = await self._request("GET", "/memories/safe", params=params)
+        if not isinstance(data, list):
+            raise AgentMemoryClientError("Unexpected response from GET /memories/safe")
+        return _json_safe(data)
+
+    async def acknowledge_violation(self, violation_id: str, acknowledged_by: str) -> dict[str, Any]:
+        data = await self._request(
+            "POST",
+            f"/violations/{violation_id}/acknowledge",
+            json={"acknowledged_by": acknowledged_by},
+        )
+        if not isinstance(data, dict):
+            raise AgentMemoryClientError("Unexpected response from POST /violations/.../acknowledge")
+        return _json_safe(data)
+
+    async def get_notifications(self, *, limit: int = 20) -> list[dict[str, Any]]:
+        data = await self._request("GET", "/notifications", params={"limit": limit})
+        if not isinstance(data, list):
+            raise AgentMemoryClientError("Unexpected response from GET /notifications")
+        return _json_safe(data)
+
+    async def run_rules_check(self, memory_id: str) -> dict[str, Any]:
+        data = await self._request("POST", f"/memories/{memory_id}/check-rules")
+        if not isinstance(data, dict):
+            raise AgentMemoryClientError("Unexpected response from POST /memories/.../check-rules")
+        return _json_safe(data)

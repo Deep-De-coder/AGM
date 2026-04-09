@@ -309,7 +309,38 @@ if __name__ == "__main__":
 
 Use `async with client.session("agent_memory") as session:` and `load_mcp_tools` when you need one long-lived MCP subprocess (see [langchain-mcp-adapters](https://github.com/langchain-ai/langchain-mcp-adapters)).
 
-### 4. Three-agent workflow (conceptual)
+### 4. Safe reasoning before retrieval
+
+Before using memory content in high-stakes or multi-step reasoning, call **`get_safe_memories`** (or **`query_memories`** with a strict `min_trust_score`) so you only surface memories that meet trust, flag, and violation filters. Example pattern:
+
+```python
+safe = await tools["get_safe_memories"].ainvoke(
+    {"min_trust_score": 0.7, "exclude_flagged": True, "limit": 15}
+)
+# Use only items from `safe` as context; optionally cross-check `check_violations` per id.
+```
+
+### 5. Monitoring loop: notifications
+
+For long-running agents, poll **`get_notifications`** every *N* steps (or on a timer) so security and trust alerts are not missed:
+
+```python
+N = 20
+for step in range(1000):
+    # ... main agent work ...
+    if step % N == 0:
+        notes = await tools["get_notifications"].ainvoke({})
+        for n in notes:
+            if not n.get("read"):
+                # surface or log n["title"], n["message"], n["severity"]
+                pass
+```
+
+### 6. Inter-agent memory warning
+
+Memories with **`source_type="inter_agent"`** can carry higher provenance risk. Always call **`check_violations`** (or **`run_rules_check`**) before acting on them in critical reasoning, and treat **`RULE_006`** (inter-agent without session) as a signal to review provenance.
+
+### 7. Three-agent workflow (conceptual)
 
 **Agent A** registers and writes a memory. **Agent B** reads it and writes a follow-up. **Agent C** queries with a trust threshold. The same sequence applies if a single LLM orchestrates tool calls.
 
@@ -377,10 +408,18 @@ async def three_agent_workflow():
 | `write_memory` | Create memory with provenance (`session_id`, `safety_context` optional). |
 | `read_memory` | Fetch one memory; API logs read in provenance when configured. |
 | `query_memories` | Returns `{"memories": [...]}` with filters. |
-| `get_trust_score` | Trust and flag fields for one memory. |
+| `get_trust_score` | Trust and flag fields for one memory (`GET /memories/{id}/trust`). |
 | `get_provenance` | Returns `{"events": [...]}` audit trail. |
 | `flag_memory` | Manual flag with reason. |
 | `register_agent` | Returns `agent_id` and `name`. |
+| `check_violations` | List rule hits for a memory (`GET /violations?memory_id=...`). |
+| `get_safe_memories` | Memories above trust threshold, not flagged, no unacknowledged violations (`GET /memories/safe`). |
+| `acknowledge_violation` | Acknowledge a violation after review (`POST /violations/{id}/acknowledge`). |
+| `get_notifications` | Recent security/trust notifications (`GET /notifications`). |
+| `run_rules_check` | Run rules on a memory and return findings (`POST /memories/{id}/check-rules`). |
+| `get_rules_reference` | Static list of all 10 predefined rules (no HTTP call). |
+
+**HTTP mapping:** the MCP client calls the FastAPI routes under `/memories`, `/agents`, `/violations`, and `/notifications` (trust is exposed at `/memories/{id}/trust`). When the API returns HTTP status ≥ 400, tools raise an MCP error whose message is the backend error body (for example FastAPI `detail`).
 
 ### Errors if the backend is down
 

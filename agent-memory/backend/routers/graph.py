@@ -26,7 +26,9 @@ async def get_graph(db: AsyncSession = Depends(get_db)) -> GraphPayload:
     agents = list(agents_r.scalars().all())
 
     mem_r = await db.execute(
-        select(Memory).where(Memory.is_deleted.is_(False)).options(selectinload(Memory.agent))
+        select(Memory)
+        .where(Memory.is_deleted.is_(False))
+        .options(selectinload(Memory.agent))
     )
     memories = list(mem_r.scalars().all())
 

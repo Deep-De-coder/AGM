@@ -1,8 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle } from "lucide-react";
+import { useSearchParams } from "react-router-dom";
 import { api, type MemoryListItem } from "../api";
 import { Badge, Button, Card, cn } from "../components/ui";
+import { severityBadgeClass } from "../lib/severity";
 
 function preview(s: string, n = 50) {
   if (s.length <= n) return s;
@@ -28,11 +30,35 @@ function trustBadge(score: number) {
 }
 
 export function MemoriesPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [agentId, setAgentId] = useState("");
   const [sourceType, setSourceType] = useState("");
   const [minTrust, setMinTrust] = useState(0);
   const [flaggedOnly, setFlaggedOnly] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const m = searchParams.get("memory");
+    setSelectedId(m);
+  }, [searchParams]);
+
+  function selectMemory(id: string) {
+    setSelectedId(id);
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set("memory", id);
+      return next;
+    });
+  }
+
+  function closeDetail() {
+    setSelectedId(null);
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.delete("memory");
+      return next;
+    });
+  }
 
   const params = useMemo(() => {
     const p = new URLSearchParams();
@@ -53,6 +79,13 @@ export function MemoriesPage() {
     queryKey: ["memory", selectedId],
     queryFn: () => api.memory(selectedId!),
     enabled: !!selectedId,
+  });
+
+  const memoryViolations = useQuery({
+    queryKey: ["memory-violations", selectedId],
+    queryFn: () => api.getMemoryViolations(selectedId!),
+    enabled: !!selectedId,
+    retry: false,
   });
 
   const breakdown = useMemo(() => {
@@ -131,7 +164,7 @@ export function MemoriesPage() {
               {list.data?.items.map((m: MemoryListItem) => (
                 <tr
                   key={m.id}
-                  onClick={() => setSelectedId(m.id)}
+                  onClick={() => selectMemory(m.id)}
                   className={cn(
                     "border-b border-zinc-800/80 cursor-pointer hover:bg-zinc-800/40",
                     selectedId === m.id && "bg-zinc-800/60",
@@ -209,10 +242,50 @@ export function MemoriesPage() {
                 ))}
               </ul>
             </Card>
+            <Card>
+              <p className="text-sm font-medium mb-2">Violations</p>
+              {memoryViolations.isLoading && (
+                <p className="text-xs text-zinc-500">Loading…</p>
+              )}
+              {memoryViolations.isError && (
+                <p className="text-xs text-zinc-500">
+                  Violations could not be loaded.
+                </p>
+              )}
+              {!memoryViolations.isLoading &&
+                !memoryViolations.isError &&
+                (memoryViolations.data?.length ?? 0) === 0 && (
+                  <Badge className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                    No violations detected
+                  </Badge>
+                )}
+              {!memoryViolations.isLoading &&
+                !memoryViolations.isError &&
+                (memoryViolations.data?.length ?? 0) > 0 && (
+                  <ul className="space-y-2">
+                    {(memoryViolations.data ?? []).map((v) => (
+                      <li
+                        key={v.id}
+                        className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-2 text-xs"
+                      >
+                        <div className="flex items-center gap-2 flex-wrap mb-1">
+                          <span className="font-mono text-zinc-300">
+                            {v.rule_name}
+                          </span>
+                          <Badge className={severityBadgeClass(v.severity)}>
+                            {v.severity}
+                          </Badge>
+                        </div>
+                        <p className="text-zinc-400">{v.description}</p>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+            </Card>
             <Button
               variant="outline"
               className="w-full"
-              onClick={() => setSelectedId(null)}
+              onClick={closeDetail}
             >
               Close
             </Button>

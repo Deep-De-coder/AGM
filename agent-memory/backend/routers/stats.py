@@ -18,7 +18,9 @@ async def get_summary(db: AsyncSession = Depends(get_db)) -> DashboardSummary:
     total = int(
         (
             await db.execute(
-                select(func.count()).select_from(Memory).where(Memory.is_deleted.is_(False))
+                select(func.count())
+                .select_from(Memory)
+                .where(Memory.is_deleted.is_(False))
             )
         ).scalar_one()
     )
@@ -37,13 +39,25 @@ async def get_summary(db: AsyncSession = Depends(get_db)) -> DashboardSummary:
     avg_raw = avg_row.scalar_one()
     avg_trust = float(avg_raw) if avg_raw is not None else 0.0
 
-    agents = int((await db.execute(select(func.count()).select_from(Agent))).scalar_one())
+    agents = int(
+        (await db.execute(select(func.count()).select_from(Agent))).scalar_one()
+    )
+
+    by_src_result = await db.execute(
+        select(Memory.source_type, func.count())
+        .where(Memory.is_deleted.is_(False))
+        .group_by(Memory.source_type)
+    )
+    memories_by_source_type: dict[str, int] = {
+        str(st): int(c) for st, c in by_src_result.all()
+    }
 
     return DashboardSummary(
         total_memories=total,
-        flagged_memories=flagged,
-        avg_trust_score=avg_trust,
-        active_agents=agents,
+        flagged_count=flagged,
+        average_trust_score=avg_trust,
+        active_agents_count=agents,
+        memories_by_source_type=memories_by_source_type,
     )
 
 
@@ -53,18 +67,24 @@ async def trust_history(
     db: AsyncSession = Depends(get_db),
 ) -> list[TrustHistoryPoint]:
     since = datetime.now(timezone.utc) - timedelta(hours=hours)
-    result = await db.execute(
-        select(TrustMetricSnapshot)
-        .where(TrustMetricSnapshot.recorded_at >= since)
-        .order_by(TrustMetricSnapshot.recorded_at.asc())
+    hour_bucket = func.date_trunc("hour", TrustMetricSnapshot.created_at).label(
+        "bucket"
     )
-    rows = result.scalars().all()
+    result = await db.execute(
+        select(
+            hour_bucket,
+            func.avg(TrustMetricSnapshot.trust_score).label("average_trust_score"),
+        )
+        .where(TrustMetricSnapshot.created_at >= since)
+        .group_by(hour_bucket)
+        .order_by(hour_bucket.asc())
+    )
+    rows = result.all()
     return [
         TrustHistoryPoint(
-            recorded_at=r.recorded_at,
-            avg_trust_score=r.avg_trust_score,
-            total_memories=r.total_memories,
-            flagged_count=r.flagged_count,
+            timestamp=r.bucket,
+            average_trust_score=float(r.average_trust_score),
         )
         for r in rows
+        if r.bucket is not None
     ]

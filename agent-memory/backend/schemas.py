@@ -112,16 +112,15 @@ class MemoryFlagBody(BaseModel):
 # --- Dashboard / stats ---
 class DashboardSummary(BaseModel):
     total_memories: int
-    flagged_memories: int
-    avg_trust_score: float
-    active_agents: int
+    flagged_count: int
+    average_trust_score: float
+    active_agents_count: int
+    memories_by_source_type: dict[str, int]
 
 
 class TrustHistoryPoint(BaseModel):
-    recorded_at: datetime
-    avg_trust_score: float
-    total_memories: int
-    flagged_count: int
+    timestamp: datetime
+    average_trust_score: float
 
 
 class AgentRegistryRow(BaseModel):
@@ -131,6 +130,13 @@ class AgentRegistryRow(BaseModel):
     memory_count: int
     avg_trust_score: float
     flagged_memory_count: int
+
+
+class AgentListResponse(BaseModel):
+    items: list[AgentRegistryRow]
+    total: int
+    limit: int
+    offset: int
 
 
 class GraphNode(BaseModel):
@@ -151,3 +157,31 @@ class GraphEdge(BaseModel):
 class GraphPayload(BaseModel):
     nodes: list[GraphNode]
     edges: list[GraphEdge]
+
+
+# --- Rule violations & notifications ---
+class RuleViolationResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    memory_id: uuid.UUID
+    agent_id: uuid.UUID | None
+    rule_name: str
+    severity: str
+    description: str | None
+    is_acknowledged: bool
+    acknowledged_by: str | None
+    acknowledged_at: datetime | None
+    detected_at: datetime
+    auto_flagged: bool
+    metadata: dict[str, Any] = Field(
+        validation_alias="metadata_", serialization_alias="metadata"
+    )
+
+
+class ViolationAcknowledgeBody(BaseModel):
+    acknowledged_by: str = Field(..., min_length=1, max_length=255)
+
+
+class UnreadCountResponse(BaseModel):
+    count: int

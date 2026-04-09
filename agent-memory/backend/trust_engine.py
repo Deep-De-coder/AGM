@@ -119,7 +119,9 @@ def _build_trust_breakdown(
     }
 
 
-async def run_trust_pass(session: AsyncSession) -> dict[str, Any]:
+async def run_trust_pass(
+    session: AsyncSession, *, manual: bool = False
+) -> dict[str, Any]:
     """One full recalculation for all non-deleted memories."""
     redis = await get_redis()
     result = await session.execute(
@@ -129,7 +131,9 @@ async def run_trust_pass(session: AsyncSession) -> dict[str, Any]:
     )
     memories: list[Memory] = list(result.scalars().unique().all())
 
-    by_agent_session: dict[tuple[uuid.UUID, uuid.UUID | None], list[Memory]] = defaultdict(list)
+    by_agent_session: dict[tuple[uuid.UUID, uuid.UUID | None], list[Memory]] = (
+        defaultdict(list)
+    )
     for m in memories:
         by_agent_session[(m.agent_id, m.session_id)].append(m)
 
@@ -179,7 +183,9 @@ async def run_trust_pass(session: AsyncSession) -> dict[str, Any]:
                 break
 
         if mem.session_id is not None:
-            fr_key = session_flagged_reads_cache_key(str(mem.agent_id), str(mem.session_id))
+            fr_key = session_flagged_reads_cache_key(
+                str(mem.agent_id), str(mem.session_id)
+            )
             fr_raw = await redis.get(fr_key)
             fr_count = int(fr_raw) if fr_raw is not None else 0
             if fr_count >= 3:
@@ -267,16 +273,26 @@ async def run_trust_pass(session: AsyncSession) -> dict[str, Any]:
             ex=settings.trust_cache_ttl_seconds,
         )
 
+        if manual:
+            snap_reason = "manual_trigger"
+        elif needs_flag:
+            snap_reason = "anomaly_detected"
+        else:
+            snap_reason = "scheduled_decay"
+        session.add(
+            TrustMetricSnapshot(
+                memory_id=mem.id,
+                trust_score=new_trust,
+                time_decay_factor=time_decay_factor,
+                source_reliability_factor=rel,
+                anomaly_penalty=anomaly_penalty,
+                snapshot_reason=snap_reason,
+            )
+        )
+
     total = len(memories)
     flagged_total = sum(1 for m in memories if m.is_flagged)
     avg_trust = sum(m.trust_score for m in memories) / total if total else 0.0
-    snap = TrustMetricSnapshot(
-        recorded_at=datetime.now(timezone.utc),
-        avg_trust_score=avg_trust,
-        total_memories=total,
-        flagged_count=flagged_total,
-    )
-    session.add(snap)
     await session.commit()
 
     return {
@@ -290,7 +306,7 @@ async def run_trust_pass(session: AsyncSession) -> dict[str, Any]:
 
 async def run_trust_cycle() -> dict[str, Any]:
     async with AsyncSessionLocal() as session:
-        return await run_trust_pass(session)
+        return await run_trust_pass(session, manual=False)
 
 
 def start_trust_background_task(
@@ -303,7 +319,7 @@ def start_trust_background_task(
         while True:
             try:
                 async with AsyncSessionLocal() as session:
-                    await run_trust_pass(session)
+                    await run_trust_pass(session, manual=False)
                 await asyncio.sleep(interval_seconds)
             except asyncio.CancelledError:
                 raise
@@ -326,3 +342,14 @@ async def stop_trust_background_task() -> None:
         except asyncio.CancelledError:
             pass
         _TRUST_TASK = None
+
+
+def start_trust_engine(
+    interval_seconds: int = 60,
+    on_error: Callable[[BaseException], None] | None = None,
+) -> asyncio.Task[None]:
+    """Start the periodic trust-decay background loop (app lifespan)."""
+    return start_trust_background_task(
+        interval_seconds=interval_seconds,
+        on_error=on_error,
+    )

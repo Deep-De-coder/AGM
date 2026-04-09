@@ -5,8 +5,13 @@ from __future__ import annotations
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp.exceptions import ToolError
 
 from agent_memory_mcp.client import AgentMemoryClient, AgentMemoryClientError
+
+
+def _tool_error(e: AgentMemoryClientError) -> ToolError:
+    return ToolError(str(e))
 
 
 def register_tools(mcp: FastMCP, client: AgentMemoryClient) -> None:
@@ -36,7 +41,7 @@ def register_tools(mcp: FastMCP, client: AgentMemoryClient) -> None:
                 session_id=session_id,
             )
         except AgentMemoryClientError as e:
-            raise RuntimeError(str(e)) from e
+            raise _tool_error(e) from e
 
     @mcp.tool(
         description=(
@@ -47,7 +52,7 @@ def register_tools(mcp: FastMCP, client: AgentMemoryClient) -> None:
         try:
             return await client.read_memory(memory_id)
         except AgentMemoryClientError as e:
-            raise RuntimeError(str(e)) from e
+            raise _tool_error(e) from e
 
     @mcp.tool(
         description=(
@@ -71,7 +76,7 @@ def register_tools(mcp: FastMCP, client: AgentMemoryClient) -> None:
             )
             return {"memories": memories}
         except AgentMemoryClientError as e:
-            raise RuntimeError(str(e)) from e
+            raise _tool_error(e) from e
 
     @mcp.tool(
         description=(
@@ -82,7 +87,7 @@ def register_tools(mcp: FastMCP, client: AgentMemoryClient) -> None:
         try:
             return await client.get_trust_score(memory_id)
         except AgentMemoryClientError as e:
-            raise RuntimeError(str(e)) from e
+            raise _tool_error(e) from e
 
     @mcp.tool(
         description=(
@@ -95,7 +100,7 @@ def register_tools(mcp: FastMCP, client: AgentMemoryClient) -> None:
             events = await client.get_provenance(memory_id)
             return {"events": events}
         except AgentMemoryClientError as e:
-            raise RuntimeError(str(e)) from e
+            raise _tool_error(e) from e
 
     @mcp.tool(
         description=(
@@ -107,7 +112,7 @@ def register_tools(mcp: FastMCP, client: AgentMemoryClient) -> None:
         try:
             return await client.flag_memory(memory_id, reason)
         except AgentMemoryClientError as e:
-            raise RuntimeError(str(e)) from e
+            raise _tool_error(e) from e
 
     @mcp.tool(
         description=(
@@ -121,4 +126,82 @@ def register_tools(mcp: FastMCP, client: AgentMemoryClient) -> None:
         try:
             return await client.register_agent(name, metadata)
         except AgentMemoryClientError as e:
-            raise RuntimeError(str(e)) from e
+            raise _tool_error(e) from e
+
+    @mcp.tool(
+        description=(
+            "Check if a memory has any rule violations. Always call this before using a memory in critical reasoning."
+        )
+    )
+    async def check_violations(memory_id: str) -> list[dict[str, Any]]:
+        try:
+            return await client.check_violations(memory_id)
+        except AgentMemoryClientError as e:
+            raise _tool_error(e) from e
+
+    @mcp.tool(
+        description=(
+            "Get memories that are considered safe to use in reasoning — above trust threshold, not flagged, "
+            "no active violations."
+        )
+    )
+    async def get_safe_memories(
+        agent_id: str | None = None,
+        min_trust_score: float = 0.6,
+        exclude_flagged: bool = True,
+        limit: int = 10,
+    ) -> list[dict[str, Any]]:
+        try:
+            return await client.get_safe_memories(
+                agent_id=agent_id,
+                min_trust_score=min_trust_score,
+                exclude_flagged=exclude_flagged,
+                limit=limit,
+            )
+        except AgentMemoryClientError as e:
+            raise _tool_error(e) from e
+
+    @mcp.tool(
+        description=(
+            "Acknowledge a rule violation after reviewing it. Use this to clear resolved alerts."
+        )
+    )
+    async def acknowledge_violation(violation_id: str, acknowledged_by: str) -> dict[str, Any]:
+        try:
+            return await client.acknowledge_violation(violation_id, acknowledged_by)
+        except AgentMemoryClientError as e:
+            raise _tool_error(e) from e
+
+    @mcp.tool(
+        description=(
+            "Get recent security and trust notifications from the memory store. Check this periodically in "
+            "long-running agent workflows."
+        )
+    )
+    async def get_notifications() -> list[dict[str, Any]]:
+        try:
+            raw = await client.get_notifications(limit=20)
+            return [
+                {
+                    "severity": r.get("severity"),
+                    "title": r.get("title"),
+                    "message": r.get("message"),
+                    "memory_id": r.get("memory_id"),
+                    "timestamp": r.get("timestamp"),
+                    "read": bool(r.get("read", False)),
+                }
+                for r in raw
+            ]
+        except AgentMemoryClientError as e:
+            raise _tool_error(e) from e
+
+    @mcp.tool(
+        description=(
+            "Manually trigger rule checking on a specific memory. Returns all violations found."
+        )
+    )
+    async def run_rules_check(memory_id: str) -> dict[str, Any]:
+        try:
+            return await client.run_rules_check(memory_id)
+        except AgentMemoryClientError as e:
+            raise _tool_error(e) from e

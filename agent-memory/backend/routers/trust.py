@@ -24,7 +24,9 @@ async def get_memory_trust(
     result = await db.execute(select(Memory).where(Memory.id == memory_id))
     memory = result.scalar_one_or_none()
     if memory is None or memory.is_deleted:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Memory not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Memory not found"
+        )
     return {
         "memory_id": memory.id,
         "trust_score": memory.trust_score,
@@ -42,7 +44,9 @@ async def update_memory_trust(
     result = await db.execute(select(Memory).where(Memory.id == memory_id))
     memory = result.scalar_one_or_none()
     if memory is None or memory.is_deleted:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Memory not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Memory not found"
+        )
 
     previous = memory.trust_score
     memory.trust_score = body.trust_score
