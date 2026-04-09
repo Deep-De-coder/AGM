@@ -1,13 +1,17 @@
 """Agent registration and lookup."""
 
 import uuid
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import and_, case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.database import get_db
+from backend.lib.baseline import DEFAULT_BEHAVIORAL_BASELINE
+from backend.lib.quorum_trust import compute_quorum_score, quorum_to_dict
 from backend.models import Agent, Memory
+from backend.redis_client import get_redis
 from backend.schemas import (
     AgentCreate,
     AgentListResponse,
@@ -76,7 +80,11 @@ async def list_agents(
 async def register_agent(
     body: AgentCreate, db: AsyncSession = Depends(get_db)
 ) -> Agent:
-    agent = Agent(name=body.name, metadata_=body.metadata)
+    agent = Agent(
+        name=body.name,
+        metadata_=body.metadata,
+        behavioral_baseline=dict(DEFAULT_BEHAVIORAL_BASELINE),
+    )
     db.add(agent)
     await db.commit()
     await db.refresh(agent)
@@ -92,3 +100,51 @@ async def get_agent(agent_id: uuid.UUID, db: AsyncSession = Depends(get_db)) -> 
             status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found"
         )
     return agent
+
+
+@router.get("/{agent_id}/behavioral-hash")
+async def get_behavioral_hash(
+    agent_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, object]:
+    result = await db.execute(select(Agent).where(Agent.id == agent_id))
+    agent = result.scalar_one_or_none()
+    if agent is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found"
+        )
+    now = datetime.now(timezone.utc)
+    updated = agent.behavioral_hash_updated_at
+    if updated and updated.tzinfo is None:
+        updated = updated.replace(tzinfo=timezone.utc)
+    age = 0
+    if updated:
+        age = int((now - updated).total_seconds())
+    return {
+        "agent_id": str(agent_id),
+        "behavioral_hash": agent.behavioral_hash,
+        "behavioral_hash_updated_at": (
+            agent.behavioral_hash_updated_at.isoformat()
+            if agent.behavioral_hash_updated_at
+            else None
+        ),
+        "behavioral_drift_score": agent.behavioral_drift_score,
+        "behavioral_vector": agent.behavioral_vector or {},
+        "hash_age_seconds": age,
+    }
+
+
+@router.get("/{agent_id}/quorum")
+async def get_agent_quorum(
+    agent_id: uuid.UUID,
+    session_id: uuid.UUID | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, object]:
+    result = await db.execute(select(Agent).where(Agent.id == agent_id))
+    if result.scalar_one_or_none() is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found"
+        )
+    redis = await get_redis()
+    q = await compute_quorum_score(str(agent_id), session_id, db, redis)
+    return quorum_to_dict(q)

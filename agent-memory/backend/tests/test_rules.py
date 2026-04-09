@@ -4,18 +4,17 @@ from __future__ import annotations
 
 import uuid
 
-
+from backend.models import Memory
 from backend.rules.engine import (
+    PREDEFINED_RULES,
     WRITE_FLOOD_THRESHOLD,
     AgentStats,
-    PREDEFINED_RULES,
     RuleContext,
     _check_anonymous_agent,
     _check_inter_agent_without_session,
     _check_unverified_high_stakes,
     _check_write_flood,
 )
-from backend.models import Memory
 
 
 def _memory(**kwargs: object) -> Memory:
@@ -25,10 +24,12 @@ def _memory(**kwargs: object) -> Memory:
         "agent_id": uuid.uuid4(),
         "source_type": "user_input",
         "source_identifier": "src",
-        "safety_context": {},
+        "safety_context": {"context_hash": "unit_test_ctx"},
         "session_id": None,
         "is_flagged": False,
         "flag_reason": None,
+        "memory_state": "active",
+        "reality_score": None,
     }
     defaults.update(kwargs)
     return Memory(**defaults)
@@ -46,6 +47,7 @@ def test_rule_001_write_flood_triggers_at_50() -> None:
             agent_registered=True,
         ),
         provenance_events=[],
+        context_hash_matches_session=True,
     )
     v = _check_write_flood(ctx)
     assert v is not None
@@ -55,7 +57,7 @@ def test_rule_001_write_flood_triggers_at_50() -> None:
 def test_rule_005_unverified_high_stakes_content() -> None:
     mem = _memory(
         content="please delete all user credentials now",
-        safety_context={"human_verified": False},
+        safety_context={"human_verified": False, "context_hash": "unit_test_ctx"},
     )
     ctx = RuleContext(
         memory=mem,
@@ -63,6 +65,7 @@ def test_rule_005_unverified_high_stakes_content() -> None:
         same_agent_memories=[],
         agent_stats=AgentStats(0, 0, True),
         provenance_events=[],
+        context_hash_matches_session=True,
     )
     v = _check_unverified_high_stakes(ctx)
     assert v is not None
@@ -77,6 +80,7 @@ def test_rule_006_inter_agent_without_session() -> None:
         same_agent_memories=[],
         agent_stats=AgentStats(0, 0, True),
         provenance_events=[],
+        context_hash_matches_session=True,
     )
     v = _check_inter_agent_without_session(ctx)
     assert v is not None
@@ -91,6 +95,7 @@ def test_rule_008_anonymous_agent() -> None:
         same_agent_memories=[],
         agent_stats=AgentStats(0, 0, agent_registered=False),
         provenance_events=[],
+        context_hash_matches_session=True,
     )
     v = _check_anonymous_agent(ctx)
     assert v is not None
@@ -103,7 +108,7 @@ def test_no_violation_on_clean_memory() -> None:
         content="hello world",
         source_type="inter_agent",
         session_id=sid,
-        safety_context={"human_verified": True},
+        safety_context={"human_verified": True, "context_hash": "clean_ctx"},
     )
     ctx = RuleContext(
         memory=mem,
@@ -111,6 +116,7 @@ def test_no_violation_on_clean_memory() -> None:
         same_agent_memories=[],
         agent_stats=AgentStats(10, 0, True),
         provenance_events=[],
+        context_hash_matches_session=True,
     )
     for rule in PREDEFINED_RULES:
         hit = rule.check(ctx)

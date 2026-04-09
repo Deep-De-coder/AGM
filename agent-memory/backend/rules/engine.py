@@ -3,17 +3,17 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from difflib import SequenceMatcher
-from typing import Callable
 
-from backend.models import Memory, MemoryProvenanceLog, utcnow
+from backend.models import Agent, Memory, MemoryProvenanceLog, utcnow
 
 
 @dataclass
 class RuleViolation:
-    memory_id: str
+    memory_id: str | None
     agent_id: str
     rule_name: str
     severity: str  # LOW, MEDIUM, HIGH, CRITICAL
@@ -40,6 +40,10 @@ class RuleContext:
     same_agent_memories: list[Memory]
     agent_stats: AgentStats
     provenance_events: list[MemoryProvenanceLog]
+    agent_db: Agent | None = None
+    context_hash_matches_session: bool = False
+    causal_chain_valid: bool | None = None
+    causal_chain_reason: str | None = None
 
 
 def _violation(
@@ -218,6 +222,83 @@ def _check_inter_agent_without_session(ctx: RuleContext) -> RuleViolation | None
             "Inter-agent memory written without session tracking — provenance incomplete.",
             auto_flagged=False,
         )
+    return None
+
+
+# --- RULE_011 behavioral_drift -------------------------------------------
+
+
+def _check_behavioral_drift(ctx: RuleContext) -> RuleViolation | None:
+    agent = ctx.agent_db
+    if agent is None or agent.behavioral_baseline is None:
+        return None
+    bl = agent.behavioral_baseline
+    mems = ctx.session_memories
+    if not mems:
+        return None
+    n = len(mems)
+    avg_len = sum(len(m.content) for m in mems) / float(n)
+    std_c = float(bl.get("std_content_length", 50))
+    base_c = float(bl.get("avg_content_length", 200))
+    if abs(avg_len - base_c) > 2 * std_c:
+        return _violation(
+            ctx,
+            "RULE_011",
+            "HIGH",
+            "Agent write pattern deviates >2σ from registered behavioral baseline — possible impersonation",
+            auto_flagged=True,
+        )
+    std_w = float(bl.get("std_writes_per_session", 5))
+    base_w = float(bl.get("avg_writes_per_session", 10))
+    if abs(float(n) - base_w) > 2 * std_w:
+        return _violation(
+            ctx,
+            "RULE_011",
+            "HIGH",
+            "Agent write pattern deviates >2σ from registered behavioral baseline — possible impersonation",
+            auto_flagged=True,
+        )
+    return None
+
+
+# --- RULE_012 causal_orphan ----------------------------------------------
+
+
+def _check_causal_orphan(ctx: RuleContext) -> RuleViolation | None:
+    if ctx.causal_chain_valid is False:
+        return _violation(
+            ctx,
+            "RULE_012",
+            "HIGH",
+            ctx.causal_chain_reason
+            or "Causal chain / vector clock validation failed",
+            auto_flagged=True,
+        )
+    sc = ctx.memory.safety_context or {}
+    ch = sc.get("context_hash")
+    if ch is None:
+        return _violation(
+            ctx,
+            "RULE_012",
+            "HIGH",
+            "Memory context_hash matches no known session state — possible fabricated or injected memory",
+            auto_flagged=True,
+        )
+    if not ctx.context_hash_matches_session:
+        return _violation(
+            ctx,
+            "RULE_012",
+            "HIGH",
+            "Memory context_hash matches no known session state — possible fabricated or injected memory",
+            auto_flagged=True,
+        )
+    return None
+
+
+# --- RULE_013 anergy_bypass_attempt (write-time: never fires) ------------
+
+
+def _check_anergy_bypass_attempt(ctx: RuleContext) -> RuleViolation | None:
     return None
 
 
@@ -410,5 +491,23 @@ PREDEFINED_RULES: list[Rule] = [
         description="Trust dropped >0.4 in one trust_updated event.",
         severity="HIGH",
         check=_check_trust_score_cliff,
+    ),
+    Rule(
+        name="RULE_011",
+        description="Write pattern deviates from behavioral baseline (>2σ).",
+        severity="HIGH",
+        check=_check_behavioral_drift,
+    ),
+    Rule(
+        name="RULE_012",
+        description="safety_context.context_hash missing or unknown session.",
+        severity="HIGH",
+        check=_check_causal_orphan,
+    ),
+    Rule(
+        name="RULE_013",
+        description="Direct query for anergic memories (checked at query time).",
+        severity="CRITICAL",
+        check=_check_anergy_bypass_attempt,
     ),
 ]

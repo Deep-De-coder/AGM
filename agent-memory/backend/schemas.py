@@ -19,6 +19,10 @@ class AgentResponse(BaseModel):
     id: uuid.UUID
     name: str
     created_at: datetime
+    behavioral_drift_score: float | None = None
+    system_prompt_hash: str | None = None
+    behavioral_hash: str | None = None
+    behavioral_hash_updated_at: datetime | None = None
     metadata: dict[str, Any] = Field(
         validation_alias="metadata_",
         serialization_alias="metadata",
@@ -39,6 +43,13 @@ class MemoryCreateResponse(BaseModel):
     memory_id: uuid.UUID
     trust_score: float
     created_at: datetime
+    dca_warning: str | None = None
+    behavioral_hash: str | None = None
+    behavioral_drift: float | None = None
+    content_hash: str | None = None
+    quorum: dict[str, Any] | None = None
+    quorum_warning: str | None = None
+    rules_check: str | None = None
 
 
 class MemoryProvenanceEvent(BaseModel):
@@ -66,10 +77,20 @@ class MemoryDetail(BaseModel):
     is_flagged: bool
     flag_reason: str | None
     session_id: uuid.UUID | None
+    memory_state: str = "active"
+    reality_score: float | None = None
     created_at: datetime
     updated_at: datetime
     is_deleted: bool
     provenance: list[MemoryProvenanceEvent] = Field(default_factory=list)
+    reconsolidation: dict[str, Any] | None = None
+    integrity: dict[str, Any] | None = None
+    causal: dict[str, Any] | None = None
+    content_hash: str | None = None
+    content_hash_valid: bool | None = None
+    trust_recomputed: bool | None = None
+    live_quorum: dict[str, Any] | None = None
+    quorum_warning: str | None = None
 
 
 class MemoryListItem(BaseModel):
@@ -86,6 +107,8 @@ class MemoryListItem(BaseModel):
     is_flagged: bool
     flag_reason: str | None
     session_id: uuid.UUID | None
+    memory_state: str = "active"
+    reality_score: float | None = None
     created_at: datetime
     updated_at: datetime
     is_deleted: bool
@@ -110,17 +133,31 @@ class MemoryFlagBody(BaseModel):
 
 
 # --- Dashboard / stats ---
+class DangerSignalsBlock(BaseModel):
+    anergy_ratio: float
+    source_diversity_index: float
+    reasoning_coherence: float
+    anergy_threshold_breached: bool
+    diversity_threshold_breached: bool
+    coherence_threshold_breached: bool
+
+
 class DashboardSummary(BaseModel):
     total_memories: int
     flagged_count: int
     average_trust_score: float
     active_agents_count: int
     memories_by_source_type: dict[str, int]
+    danger_signals: DangerSignalsBlock
+    dca: dict[str, Any] | None = None
+    quorum_health: dict[str, Any] | None = None
+    integrity: dict[str, Any] | None = None
 
 
 class TrustHistoryPoint(BaseModel):
     timestamp: datetime
     average_trust_score: float
+    total_memories: int = 0
 
 
 class AgentRegistryRow(BaseModel):
@@ -151,6 +188,7 @@ class GraphEdge(BaseModel):
     source: str
     target: str
     label: str
+    type: str | None = None
     data: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -164,8 +202,9 @@ class RuleViolationResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
-    memory_id: uuid.UUID
+    memory_id: uuid.UUID | None
     agent_id: uuid.UUID | None
+    agent_name: str | None = None
     rule_name: str
     severity: str
     description: str | None

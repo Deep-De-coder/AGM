@@ -140,6 +140,140 @@ export function DashboardPage() {
         </Card>
       </div>
 
+      {(s?.dca || s?.quorum_health || s?.integrity) && (
+        <div className="grid gap-4 sm:grid-cols-3">
+          {s?.dca && (
+            <Card>
+              <p className="text-sm text-zinc-400">Dendritic cell scan</p>
+              <p className="text-xs text-zinc-500 mt-1">
+                Last:{" "}
+                {s.dca.last_scan_at
+                  ? new Date(s.dca.last_scan_at).toLocaleString()
+                  : "—"}
+              </p>
+              <div className="mt-2 flex flex-wrap gap-2 text-xs">
+                <span className="text-emerald-400">
+                  SAFE {s.dca.agents_safe}
+                </span>
+                <span className="text-amber-400">
+                  SEMI {s.dca.agents_semi_mature}
+                </span>
+                <span className="text-red-400">
+                  DANGER {s.dca.agents_in_danger}
+                </span>
+              </div>
+              {s.dca.agents_in_danger > 0 && (
+                <p className="mt-2 text-sm text-red-300 animate-pulse">
+                  Agent(s) in MATURE_DANGER — review flagged memories.
+                </p>
+              )}
+            </Card>
+          )}
+          {s?.quorum_health && (
+            <Card>
+              <p className="text-sm text-zinc-400">Quorum health</p>
+              <p className="text-xs text-zinc-500 mt-1">
+                Full {s.quorum_health.full_quorum_agents} · Partial{" "}
+                {s.quorum_health.partial_quorum_agents} · Failed{" "}
+                {s.quorum_health.failed_quorum_agents}
+              </p>
+            </Card>
+          )}
+          {s?.integrity && (
+            <Card>
+              <p className="text-sm text-zinc-400">Storage integrity</p>
+              <p
+                className={cn(
+                  "text-2xl font-semibold tabular-nums mt-1",
+                  s.integrity.verified < s.integrity.total_with_hash
+                    ? "text-red-400"
+                    : "text-emerald-400",
+                )}
+              >
+                {s.integrity.verified} / {s.integrity.total_with_hash}
+              </p>
+              <p className="text-xs text-zinc-500 mt-1">
+                Memories with valid content hash
+              </p>
+            </Card>
+          )}
+        </div>
+      )}
+
+      {s?.danger_signals && (
+        <>
+          {(() => {
+            const ds = s.danger_signals;
+            const anyBreached =
+              ds.anergy_threshold_breached ||
+              ds.diversity_threshold_breached ||
+              ds.coherence_threshold_breached;
+            return (
+              <>
+                {anyBreached && (
+                  <div className="rounded-lg border border-red-500/50 bg-red-950/40 px-4 py-3 text-sm text-red-200">
+                    ⚠ Danger signal threshold breached — check notifications for
+                    details
+                  </div>
+                )}
+                <div>
+                  <h2 className="text-lg font-medium text-zinc-200 mb-3">
+                    System Health
+                  </h2>
+                  <div className="grid gap-4 sm:grid-cols-3">
+                    <Card>
+                      <p className="text-sm text-zinc-400">Anergy Ratio</p>
+                      <p
+                        className={`text-2xl font-semibold tabular-nums ${
+                          ds.anergy_threshold_breached
+                            ? "text-red-400"
+                            : "text-emerald-400"
+                        }`}
+                      >
+                        {(ds.anergy_ratio * 100).toFixed(1)}%
+                      </p>
+                      <p className="text-xs text-zinc-500 mt-1">
+                        Unvalidated memory accumulation
+                      </p>
+                    </Card>
+                    <Card>
+                      <p className="text-sm text-zinc-400">Source Diversity</p>
+                      <p
+                        className={`text-2xl font-semibold tabular-nums ${
+                          ds.diversity_threshold_breached
+                            ? "text-red-400"
+                            : "text-emerald-400"
+                        }`}
+                      >
+                        {ds.source_diversity_index.toFixed(2)}
+                      </p>
+                      <p className="text-xs text-zinc-500 mt-1">
+                        Memory source entropy (0–1)
+                      </p>
+                    </Card>
+                    <Card>
+                      <p className="text-sm text-zinc-400">Reasoning Coherence</p>
+                      <p
+                        className={`text-2xl font-semibold tabular-nums ${
+                          ds.coherence_threshold_breached
+                            ? "text-red-400"
+                            : "text-emerald-400"
+                        }`}
+                      >
+                        {ds.reasoning_coherence.toFixed(2)}
+                      </p>
+                      <p className="text-xs text-zinc-500 mt-1">
+                        Consecutive memory similarity
+                      </p>
+                    </Card>
+                  </div>
+                </div>
+              </>
+            );
+          })()}
+        </>
+      )}
+
       {s?.memories_by_source_type &&
         Object.keys(s.memories_by_source_type).length > 0 && (
           <Card>

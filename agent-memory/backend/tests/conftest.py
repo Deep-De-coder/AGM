@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator
+from typing import Any
 
 import pytest
 import pytest_asyncio
@@ -33,11 +34,12 @@ def _patch_metadata_for_sqlite(base: type[DeclarativeBase]) -> None:
 
 
 class FakeRedis:
-    """Minimal async Redis stub (get/set/incr/expire/delete/lpush/ltrim)."""
+    """Minimal async Redis stub (get/set/incr/expire/delete/lpush/ltrim/smembers/sadd/lrange)."""
 
     def __init__(self) -> None:
         self._data: dict[str, str] = {}
         self._lists: dict[str, list[str]] = {}
+        self._sets: dict[str, set[str]] = {}
 
     async def get(self, key: str) -> str | None:
         return self._data.get(key)
@@ -61,6 +63,12 @@ class FakeRedis:
             if k in self._data:
                 del self._data[k]
                 n += 1
+            if k in self._lists:
+                del self._lists[k]
+                n += 1
+            if k in self._sets:
+                del self._sets[k]
+                n += 1
         return n
 
     async def lpush(self, key: str, *values: str) -> int:
@@ -74,9 +82,39 @@ class FakeRedis:
         self._lists[key] = lst[start : end + 1 if end >= 0 else None]
         return True
 
+    async def lrange(self, key: str, start: int, end: int) -> list[str]:
+        lst = self._lists.get(key, [])
+        if end < 0:
+            end = len(lst) - 1
+        return lst[start : end + 1]
+
+    async def sadd(self, key: str, *members: str) -> int:
+        s = self._sets.setdefault(key, set())
+        before = len(s)
+        for m in members:
+            s.add(m)
+        return len(s) - before
+
+    async def smembers(self, key: str) -> set[str]:
+        return set(self._sets.get(key, set()))
+
+    async def scan_iter(self, match: str = "*") -> Any:  # noqa: ANN401
+        import fnmatch
+
+        all_keys: set[str] = set(self._data.keys()) | set(self._lists.keys()) | set(self._sets.keys())
+        for k in sorted(all_keys):
+            if fnmatch.fnmatch(k, match):
+                yield k
+
+    async def ttl(self, key: str) -> int:
+        if key in self._data or key in self._lists or key in self._sets:
+            return 30
+        return -2
+
     async def close(self) -> None:
         self._data.clear()
         self._lists.clear()
+        self._sets.clear()
 
 
 @pytest_asyncio.fixture
@@ -135,6 +173,14 @@ async def override_db(
         "backend.routers.trust",
         "backend.rules.checker",
         "backend.routers.admin",
+        "backend.routers.notifications",
+        "backend.routers.stats",
+        "backend.routers.agents",
+        "backend.lib.behavioral_hash",
+        "backend.lib.content_address",
+        "backend.lib.quorum_trust",
+        "backend.dendritic_cell",
+        "backend.lib.reconsolidation",
     ):
         try:
             monkeypatch.setattr(f"{mod}.get_redis", _get_redis)

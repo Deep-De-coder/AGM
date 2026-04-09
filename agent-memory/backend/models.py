@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, String, Text, func
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -32,8 +32,44 @@ class Agent(Base):
     metadata_: Mapped[dict[str, Any]] = mapped_column(
         "metadata", JSONB, nullable=False, default=dict
     )
+    behavioral_baseline: Mapped[dict[str, Any] | None] = mapped_column(
+        JSONB, nullable=True
+    )
+    behavioral_drift_score: Mapped[float] = mapped_column(
+        Float, nullable=False, default=0.0, server_default="0.0"
+    )
+    system_prompt_hash: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    behavioral_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    behavioral_hash_updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    behavioral_vector: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
 
     memories: Mapped[list["Memory"]] = relationship(back_populates="agent")
+    sessions: Mapped[list["Session"]] = relationship(back_populates="agent")
+
+
+class Session(Base):
+    """Optional session row for context_hash linkage and outcome tracking."""
+
+    __tablename__ = "sessions"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    context_hash: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    agent_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("agents.id", ondelete="SET NULL"), nullable=True
+    )
+    outcome: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=utcnow,
+        server_default=func.now(),
+        nullable=False,
+    )
+
+    agent: Mapped["Agent | None"] = relationship(back_populates="sessions")
 
 
 class Memory(Base):
@@ -78,6 +114,26 @@ class Memory(Base):
     is_deleted: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="false"
     )
+    memory_state: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="active", server_default="active"
+    )
+    reality_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    content_hash_verified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    content_hash_valid: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default="true"
+    )
+    causal_parents: Mapped[list[Any]] = mapped_column(
+        JSONB, nullable=False, default=list
+    )
+    vector_clock: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=dict
+    )
+    causal_depth: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
 
     agent: Mapped["Agent"] = relationship(back_populates="memories")
     provenance_events: Mapped[list["MemoryProvenanceLog"]] = relationship(
@@ -111,6 +167,10 @@ class TrustMetricSnapshot(Base):
     )
     anomaly_penalty: Mapped[float | None] = mapped_column(Float, nullable=True)
     snapshot_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    quorum_fast_signal: Mapped[float | None] = mapped_column(Float, nullable=True)
+    quorum_medium_signal: Mapped[float | None] = mapped_column(Float, nullable=True)
+    quorum_slow_signal: Mapped[float | None] = mapped_column(Float, nullable=True)
+    quorum_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=utcnow,
@@ -157,10 +217,10 @@ class RuleViolation(Base):
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
-    memory_id: Mapped[uuid.UUID] = mapped_column(
+    memory_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("memories.id", ondelete="CASCADE"),
-        nullable=False,
+        nullable=True,
     )
     agent_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("agents.id", ondelete="SET NULL"), nullable=True
@@ -188,4 +248,4 @@ class RuleViolation(Base):
         "metadata", JSONB, nullable=False, default=dict
     )
 
-    memory: Mapped["Memory"] = relationship(back_populates="rule_violations")
+    memory: Mapped["Memory | None"] = relationship(back_populates="rule_violations")

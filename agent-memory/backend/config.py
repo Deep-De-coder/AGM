@@ -15,10 +15,14 @@ class Settings(BaseSettings):
     debug: bool = False
 
     database_url: str = Field(
-        default="postgresql+asyncpg://postgres:postgres@localhost:5432/agent_memory",
+        default="postgresql+asyncpg://postgres:postgres@localhost:5432/agentmemory",
         description="SQLAlchemy async URL",
     )
     redis_url: str = Field(default="redis://localhost:6379/0")
+    redis_namespace: str = Field(
+        default="am:",
+        description="Prefix for Redis keys (avoid collisions across deployments).",
+    )
 
     trust_cache_ttl_seconds: int = 60
     session_writes_cache_ttl_seconds: int = 3600

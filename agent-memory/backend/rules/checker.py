@@ -12,10 +12,14 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from backend.lib.vector_clock import validate_causal_chain
 from backend.models import (
     Agent,
     Memory,
     MemoryProvenanceLog,
+    Session,
+)
+from backend.models import (
     RuleViolation as RuleViolationORM,
 )
 from backend.notifications import NotificationEvent, push_notification
@@ -76,7 +80,16 @@ async def check_memory_rules(
         return []
 
     agent_row = await db.execute(select(Agent).where(Agent.id == memory.agent_id))
-    agent_registered = agent_row.scalar_one_or_none() is not None
+    agent_db = agent_row.scalar_one_or_none()
+    agent_registered = agent_db is not None
+    raw_ch = (memory.safety_context or {}).get("context_hash")
+    if raw_ch is None:
+        ch_match = False
+    else:
+        r = await db.execute(
+            select(Session.id).where(Session.context_hash == str(raw_ch)).limit(1)
+        )
+        ch_match = r.scalar_one_or_none() is not None
 
     stats = await _agent_stats_for_memory(memory)
     stats = AgentStats(
@@ -114,12 +127,17 @@ async def check_memory_rules(
         )
         prov = list(prov_result.scalars().all())
 
+    causal_ok, causal_reason = await validate_causal_chain(memory, db)
     ctx = RuleContext(
         memory=memory,
         session_memories=session_memories,
         same_agent_memories=same_agent_memories,
         agent_stats=stats,
         provenance_events=prov,
+        agent_db=agent_db,
+        context_hash_matches_session=ch_match,
+        causal_chain_valid=causal_ok,
+        causal_chain_reason=causal_reason if not causal_ok else None,
     )
 
     violations: list[RuleViolation] = []
@@ -133,19 +151,25 @@ async def check_memory_rules(
 
     persisted: list[RuleViolation] = []
     for v in violations:
-        dup = await db.execute(
-            select(RuleViolationORM).where(
-                RuleViolationORM.memory_id == memory.id,
-                RuleViolationORM.rule_name == v.rule_name,
-                RuleViolationORM.is_acknowledged.is_(False),
-            )
+        mid = uuid.UUID(v.memory_id) if v.memory_id else None
+        dup_q = select(RuleViolationORM).where(
+            RuleViolationORM.rule_name == v.rule_name,
+            RuleViolationORM.is_acknowledged.is_(False),
         )
+        if mid is not None:
+            dup_q = dup_q.where(RuleViolationORM.memory_id == mid)
+        else:
+            dup_q = dup_q.where(
+                RuleViolationORM.memory_id.is_(None),
+                RuleViolationORM.agent_id == memory.agent_id,
+            )
+        dup = await db.execute(dup_q)
         if dup.scalar_one_or_none() is not None:
             continue
 
         row = RuleViolationORM(
             id=uuid.uuid4(),
-            memory_id=uuid.UUID(v.memory_id),
+            memory_id=mid,
             agent_id=memory.agent_id,
             rule_name=v.rule_name,
             severity=v.severity,
@@ -160,12 +184,13 @@ async def check_memory_rules(
                     (r.description for r in PREDEFINED_RULES if r.name == v.rule_name),
                     "",
                 ),
-            },
+            },  # rule_name matches Rule.name (slug)
         )
         db.add(row)
+        cache_mid = v.memory_id or memory_id
         await _cache_violation(
             redis,
-            v.memory_id,
+            cache_mid,
             {
                 "id": str(row.id),
                 "rule_name": v.rule_name,
@@ -187,7 +212,7 @@ async def check_memory_rules(
                     severity=v.severity,
                     title=f"Rule violation: {v.rule_name}",
                     message=v.description,
-                    memory_id=v.memory_id,
+                    memory_id=v.memory_id or "",
                     agent_id=v.agent_id,
                     rule_name=v.rule_name,
                     timestamp=datetime.now(timezone.utc),
@@ -229,11 +254,16 @@ async def collect_violations(
 
     violations: list[RuleViolation] = []
     agent_ids = {m.agent_id for m in memories}
+    registered: set[uuid.UUID] = set()
+    agent_by_id: dict[uuid.UUID, Agent] = {}
     if agent_ids:
         reg = await db.execute(select(Agent.id).where(Agent.id.in_(agent_ids)))
         registered = {r for r in reg.scalars().all()}
-    else:
-        registered = set()
+        ar = await db.execute(select(Agent).where(Agent.id.in_(agent_ids)))
+        for a in ar.scalars().all():
+            agent_by_id[a.id] = a
+
+    hash_cache: dict[str, bool] = {}
 
     for mem in memories:
         session_mem = [x for x in by_session[mem.session_id] if not x.is_deleted]
@@ -245,12 +275,28 @@ async def collect_violations(
             agent_registered=mem.agent_id in registered,
         )
         events = sorted(prov_by_memory.get(mem.id, []), key=lambda e: e.timestamp)
+        raw_ch = (mem.safety_context or {}).get("context_hash")
+        if raw_ch is None:
+            ch_match = False
+        else:
+            hk = str(raw_ch)
+            if hk not in hash_cache:
+                r = await db.execute(
+                    select(Session.id).where(Session.context_hash == hk).limit(1)
+                )
+                hash_cache[hk] = r.scalar_one_or_none() is not None
+            ch_match = hash_cache[hk]
+        causal_ok, causal_reason = await validate_causal_chain(mem, db)
         ctx = RuleContext(
             memory=mem,
             session_memories=session_mem,
             same_agent_memories=same_agent,
             agent_stats=stats,
             provenance_events=events,
+            agent_db=agent_by_id.get(mem.agent_id),
+            context_hash_matches_session=ch_match,
+            causal_chain_valid=causal_ok,
+            causal_chain_reason=causal_reason if not causal_ok else None,
         )
         for rule in PREDEFINED_RULES:
             v = rule.check(ctx)

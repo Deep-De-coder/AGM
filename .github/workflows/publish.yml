@@ -1,0 +1,63 @@
+name: Publish agm-memory-mcp to PyPI
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  test:
+    name: Run tests before publish
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install package and test deps
+        working-directory: agent-memory
+        run: pip install -e ".[test]"
+
+      - name: Run MCP tests
+        working-directory: agent-memory
+        run: pytest tests/test_mcp_tools.py -v
+
+      - name: Lint
+        working-directory: agent-memory
+        run: |
+          pip install ruff
+          ruff check agent_memory_mcp/
+
+  publish:
+    name: Publish to PyPI
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install build tools
+        run: pip install build twine
+
+      - name: Build package
+        working-directory: agent-memory
+        run: python -m build
+
+      - name: Check distribution
+        working-directory: agent-memory
+        run: twine check dist/*
+
+      - name: Publish to PyPI
+        working-directory: agent-memory
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+        run: twine upload dist/*

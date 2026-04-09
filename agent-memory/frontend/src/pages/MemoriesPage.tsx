@@ -11,6 +11,19 @@ function preview(s: string, n = 50) {
   return s.slice(0, n) + "…";
 }
 
+function memoryStateBadge(state: string | undefined) {
+  const s = state ?? "active";
+  const map: Record<string, string> = {
+    active: "bg-emerald-500/20 text-emerald-300",
+    anergic: "bg-amber-500/20 text-amber-300",
+    consolidated: "bg-sky-500/20 text-sky-300",
+    quarantined: "bg-red-500/20 text-red-300",
+  };
+  return (
+    <Badge className={map[s] ?? "bg-zinc-500/20 text-zinc-300"}>{s}</Badge>
+  );
+}
+
 function trustBadge(score: number) {
   if (score > 0.7)
     return (
@@ -35,7 +48,12 @@ export function MemoriesPage() {
   const [sourceType, setSourceType] = useState("");
   const [minTrust, setMinTrust] = useState(0);
   const [flaggedOnly, setFlaggedOnly] = useState(false);
+  const [memoryStateFilter, setMemoryStateFilter] = useState<string>("all");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [flagReason, setFlagReason] = useState<string>("");
+  const [actionMessage, setActionMessage] = useState<string>("");
+  const [actionError, setActionError] = useState<string>("");
+  const [actionBusy, setActionBusy] = useState<boolean>(false);
 
   useEffect(() => {
     const m = searchParams.get("memory");
@@ -67,8 +85,9 @@ export function MemoriesPage() {
     if (sourceType.trim()) p.set("source_type", sourceType.trim());
     p.set("min_trust_score", String(minTrust));
     if (flaggedOnly) p.set("flagged_only", "true");
+    if (memoryStateFilter !== "all") p.set("memory_state", memoryStateFilter);
     return p;
-  }, [agentId, sourceType, minTrust, flaggedOnly]);
+  }, [agentId, sourceType, minTrust, flaggedOnly, memoryStateFilter]);
 
   const list = useQuery({
     queryKey: ["memories", params.toString()],
@@ -98,6 +117,40 @@ export function MemoriesPage() {
       | undefined;
     return meta?.breakdown;
   }, [detail.data]);
+
+  async function handleFlagMemory() {
+    if (!selectedId || !flagReason.trim()) return;
+    setActionBusy(true);
+    setActionError("");
+    setActionMessage("");
+    try {
+      await api.flagMemory(selectedId, flagReason.trim());
+      await detail.refetch();
+      setActionMessage("Memory flagged");
+      setFlagReason("");
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Failed to flag memory");
+    } finally {
+      setActionBusy(false);
+    }
+  }
+
+  async function handleRecomputeTrust() {
+    if (!selectedId) return;
+    setActionBusy(true);
+    setActionError("");
+    setActionMessage("");
+    try {
+      await detail.refetch();
+      setActionMessage("Trust recomputed");
+    } catch (err) {
+      setActionError(
+        err instanceof Error ? err.message : "Failed to recompute trust",
+      );
+    } finally {
+      setActionBusy(false);
+    }
+  }
 
   return (
     <div className="flex gap-6">
@@ -145,6 +198,20 @@ export function MemoriesPage() {
             />
             Flagged only
           </label>
+          <label className="text-sm space-y-1">
+            <span className="text-zinc-500">Memory state</span>
+            <select
+              className="block w-44 rounded-lg border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-sm"
+              value={memoryStateFilter}
+              onChange={(e) => setMemoryStateFilter(e.target.value)}
+            >
+              <option value="all">All States</option>
+              <option value="active">Active</option>
+              <option value="anergic">Anergic</option>
+              <option value="consolidated">Consolidated</option>
+              <option value="quarantined">Quarantined</option>
+            </select>
+          </label>
         </Card>
 
         <div className="overflow-x-auto rounded-xl border border-zinc-800">
@@ -155,6 +222,7 @@ export function MemoriesPage() {
                 <th className="p-2 font-medium">Preview</th>
                 <th className="p-2 font-medium">Agent</th>
                 <th className="p-2 font-medium">Source</th>
+                <th className="p-2 font-medium">State</th>
                 <th className="p-2 font-medium">Trust</th>
                 <th className="p-2 font-medium">Flag</th>
                 <th className="p-2 font-medium">Created</th>
@@ -176,6 +244,7 @@ export function MemoriesPage() {
                   <td className="p-2 max-w-xs truncate">{preview(m.content)}</td>
                   <td className="p-2">{m.agent_name ?? "—"}</td>
                   <td className="p-2">{m.source_type}</td>
+                  <td className="p-2">{memoryStateBadge(m.memory_state)}</td>
                   <td className="p-2">{trustBadge(m.trust_score)}</td>
                   <td className="p-2">
                     {m.is_flagged ? (
@@ -209,7 +278,65 @@ export function MemoriesPage() {
           <>
             <Card>
               <p className="text-xs text-zinc-500 mb-2">Content</p>
-              <p className="text-sm whitespace-pre-wrap">{detail.data.content}</p>
+                <p className="text-sm whitespace-pre-wrap">{detail.data.content}</p>
+            </Card>
+            <Card>
+              <p className="text-xs text-zinc-500 mb-2">Integrity</p>
+              <p className="text-sm font-mono text-zinc-300">
+                {detail.data.content_hash
+                  ? `${detail.data.content_hash.slice(0, 16)}…`
+                  : "—"}
+              </p>
+              {detail.data.content_hash_valid === false ? (
+                <p className="text-red-400 text-sm mt-1">
+                  ✗ TAMPERED — hash mismatch
+                </p>
+              ) : detail.data.content_hash_valid === true ? (
+                <p className="text-emerald-400 text-sm mt-1">✓ Hash verified</p>
+              ) : (
+                <p className="text-zinc-500 text-sm mt-1">Hash not computed</p>
+              )}
+            </Card>
+            <Card>
+              <p className="text-xs text-zinc-500 mb-2">Reconsolidation</p>
+              {detail.data.reconsolidation?.is_locked ? (
+                <p className="text-amber-300 text-sm">
+                  🔒 In retrieval window
+                </p>
+              ) : (
+                <p className="text-zinc-500 text-sm">Not locked</p>
+              )}
+            </Card>
+            <Card>
+              <p className="text-xs text-zinc-500 mb-1">Memory State</p>
+              <div className="flex items-center gap-2">
+                {memoryStateBadge(detail.data.memory_state)}
+              </div>
+            </Card>
+            <Card>
+              <p className="text-sm font-medium mb-2">State History</p>
+              <ul className="space-y-2 border-l border-zinc-700 pl-3">
+                {(detail.data.provenance ?? [])
+                  .filter((e) => e.event_type === "state_changed")
+                  .map((e) => (
+                    <li key={e.id} className="text-xs">
+                      <p className="text-sky-400 font-medium">state_changed</p>
+                      <p className="text-zinc-500">
+                        {new Date(e.timestamp).toLocaleString()}
+                      </p>
+                      {Object.keys(e.event_metadata).length > 0 && (
+                        <pre className="mt-1 text-zinc-500 overflow-x-auto max-h-24">
+                          {JSON.stringify(e.event_metadata, null, 2)}
+                        </pre>
+                      )}
+                    </li>
+                  ))}
+                {(detail.data.provenance ?? []).filter(
+                  (e) => e.event_type === "state_changed",
+                ).length === 0 && (
+                  <p className="text-xs text-zinc-500">No state transitions yet.</p>
+                )}
+              </ul>
             </Card>
             <Card>
               <p className="text-sm font-medium mb-2">Trust breakdown</p>
@@ -223,6 +350,55 @@ export function MemoriesPage() {
                   provenance.
                 </p>
               )}
+            </Card>
+            <Card>
+              <p className="text-sm font-medium mb-2">Actions</p>
+              <div className="space-y-3">
+                <label className="block text-xs text-zinc-500">
+                  Flag reason
+                  <input
+                    className="mt-1 block w-full rounded-lg border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-sm"
+                    value={flagReason}
+                    onChange={(e) => setFlagReason(e.target.value)}
+                    placeholder="Reason for flagging"
+                    disabled={detail.data.reconsolidation?.is_locked}
+                  />
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <Button
+                    variant="outline"
+                    title={
+                      detail.data.reconsolidation?.is_locked
+                        ? "Memory is locked during reconsolidation window"
+                        : undefined
+                    }
+                    disabled={
+                      actionBusy ||
+                      detail.data.reconsolidation?.is_locked ||
+                      !flagReason.trim()
+                    }
+                    onClick={handleFlagMemory}
+                  >
+                    Flag Memory
+                  </Button>
+                  <Button
+                    variant="outline"
+                    title={
+                      detail.data.reconsolidation?.is_locked
+                        ? "Memory is locked during reconsolidation window"
+                        : undefined
+                    }
+                    disabled={actionBusy || detail.data.reconsolidation?.is_locked}
+                    onClick={handleRecomputeTrust}
+                  >
+                    Recompute Trust
+                  </Button>
+                </div>
+                {actionMessage && (
+                  <p className="text-xs text-emerald-400">{actionMessage}</p>
+                )}
+                {actionError && <p className="text-xs text-red-400">{actionError}</p>}
+              </div>
             </Card>
             <Card>
               <p className="text-sm font-medium mb-2">Provenance</p>

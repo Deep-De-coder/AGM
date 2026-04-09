@@ -1,10 +1,10 @@
 services:
   postgres:
-    image: pgvector/pgvector:pg16
+    image: ankane/pgvector:latest
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: agent_memory
+      POSTGRES_DB: agentmemory
     ports:
       - "5432:5432"
     volumes:
@@ -14,6 +14,8 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    networks:
+      - appnet
 
   redis:
     image: redis:7-alpine
@@ -24,13 +26,15 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
+    networks:
+      - appnet
 
   api:
     build:
       context: .
       dockerfile: Dockerfile.api
     environment:
-      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/agent_memory
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/agentmemory
       REDIS_URL: redis://redis:6379/0
     ports:
       - "8000:8000"
@@ -39,6 +43,14 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://127.0.0.1:8000/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    networks:
+      - appnet
 
   frontend:
     build:
@@ -49,7 +61,14 @@ services:
     ports:
       - "3000:80"
     depends_on:
-      - api
+      api:
+        condition: service_healthy
+    networks:
+      - appnet
 
 volumes:
   pgdata:
+
+networks:
+  appnet:
+    driver: bridge

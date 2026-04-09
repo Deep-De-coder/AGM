@@ -96,15 +96,23 @@ function GraphInner() {
       },
     }));
 
-    const edges: Edge[] = raw.edges.map((e) => ({
-      id: e.id,
-      source: e.source,
-      target: e.target,
-      label: e.label,
-      animated: e.label === "trust_updated",
-      style: { stroke: "#52525b", fontSize: 10 },
-      labelStyle: { fill: "#a1a1aa", fontSize: 10 },
-    }));
+    const edges: Edge[] = raw.edges.map((e) => {
+      const et =
+        (e.type as string | undefined) ??
+        (e.data?.kind === "causal" ? "causal" : "provenance");
+      const causal = et === "causal";
+      return {
+        id: e.id,
+        source: e.source,
+        target: e.target,
+        label: e.label,
+        animated: e.label === "trust_updated",
+        style: causal
+          ? { stroke: "#3b82f6", strokeWidth: 2 }
+          : { stroke: "#52525b", strokeDasharray: "6 4" },
+        labelStyle: { fill: "#a1a1aa", fontSize: 10 },
+      };
+    });
 
     return { nodes, edges };
   }, [q.data]);
@@ -113,9 +121,19 @@ function GraphInner() {
 
   return (
     <div className="space-y-4 h-[calc(100vh-7rem)] flex flex-col">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="text-2xl font-semibold">Memory graph</h1>
-        <p className="text-sm text-zinc-500">Refreshes every 10s</p>
+        <div className="flex flex-wrap items-center gap-4 text-xs text-zinc-400">
+          <span>
+            <span className="inline-block w-6 h-0.5 bg-blue-500 align-middle mr-1" />{" "}
+            Causal
+          </span>
+          <span>
+            <span className="inline-block w-6 border-t border-dashed border-zinc-500 align-middle mr-1" />{" "}
+            Provenance
+          </span>
+          <span className="text-zinc-500">Refreshes every 10s</span>
+        </div>
       </div>
       <div className="flex-1 rounded-xl border border-zinc-800 overflow-hidden bg-zinc-900/50">
         {q.isLoading ? (

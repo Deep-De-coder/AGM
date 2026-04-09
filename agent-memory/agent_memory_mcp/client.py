@@ -61,21 +61,29 @@ class AgentMemoryClient:
         *,
         api_prefix: str | None = None,
         timeout_seconds: float = 60.0,
+        http_client: httpx.AsyncClient | None = None,
     ) -> None:
-        self._root = (base_url or get_api_base_url()).rstrip("/")
-        self._prefix = (api_prefix if api_prefix is not None else get_api_prefix()).rstrip("/")
-        self._client = httpx.AsyncClient(
-            base_url=f"{self._root}{self._prefix}",
-            timeout=httpx.Timeout(timeout_seconds),
-            headers={"Accept": "application/json", "Content-Type": "application/json"},
-        )
+        self._owns_http_client = http_client is None
+        if http_client is not None:
+            self._client = http_client
+            bu = str(http_client.base_url).rstrip("/")
+            self._root = (base_url or bu).rstrip("/")
+        else:
+            self._root = (base_url or get_api_base_url()).rstrip("/")
+            self._prefix = (api_prefix if api_prefix is not None else get_api_prefix()).rstrip("/")
+            self._client = httpx.AsyncClient(
+                base_url=f"{self._root}{self._prefix}",
+                timeout=httpx.Timeout(timeout_seconds),
+                headers={"Accept": "application/json", "Content-Type": "application/json"},
+            )
 
     @property
     def base_url(self) -> str:
         return self._root
 
     async def aclose(self) -> None:
-        await self._client.aclose()
+        if self._owns_http_client:
+            await self._client.aclose()
 
     def _unreachable_message(self) -> str:
         return (
@@ -103,6 +111,13 @@ class AgentMemoryClient:
             return response.json()
         except json.JSONDecodeError as e:
             raise AgentMemoryClientError(f"Invalid JSON from AgentMemory API: {e}") from e
+
+    async def post(self, path: str, data: dict[str, Any] | None = None) -> Any:
+        """POST JSON to a path under the API base (used for admin triggers)."""
+        return await self._request("POST", path, json=data or {})
+
+    async def _get(self, path: str, **kwargs: Any) -> Any:
+        return await self._request("GET", path, **kwargs)
 
     async def _request(self, method: str, path: str, **kwargs: Any) -> Any:
         rel = path if path.startswith("/") else f"/{path}"
@@ -160,6 +175,7 @@ class AgentMemoryClient:
         source_type: str | None = None,
         min_trust_score: float = 0.0,
         flagged_only: bool | None = None,
+        memory_state: str | None = None,
         limit: int = 20,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
@@ -174,6 +190,8 @@ class AgentMemoryClient:
             params["source_type"] = source_type
         if flagged_only is not None:
             params["flagged_only"] = flagged_only
+        if memory_state is not None:
+            params["memory_state"] = memory_state
         data = await self._request("GET", "/memories", params=params)
         if isinstance(data, list):
             return _json_safe(data)
@@ -217,8 +235,17 @@ class AgentMemoryClient:
         }
         return _json_safe(out)
 
-    async def register_agent(self, name: str, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
-        body = {"name": name, "metadata": metadata or {}}
+    async def register_agent(
+        self,
+        name: str,
+        metadata: dict[str, Any] | None = None,
+        *,
+        system_prompt_hash: str | None = None,
+    ) -> dict[str, Any]:
+        body_metadata = dict(metadata or {})
+        if system_prompt_hash:
+            body_metadata["system_prompt_hash"] = system_prompt_hash
+        body = {"name": name, "metadata": body_metadata}
         data = await self._request("POST", "/agents", json=body)
         if not isinstance(data, dict):
             raise AgentMemoryClientError("Unexpected response from POST /agents")
@@ -229,10 +256,15 @@ class AgentMemoryClient:
 
     async def check_violations(self, memory_id: str) -> list[dict[str, Any]]:
         data = await self._request("GET", "/violations", params={"memory_id": memory_id})
-        if not isinstance(data, list):
+        rows: list[Any]
+        if isinstance(data, dict) and "items" in data:
+            rows = data["items"] if isinstance(data["items"], list) else []
+        elif isinstance(data, list):
+            rows = data
+        else:
             raise AgentMemoryClientError("Unexpected response from GET /violations")
         out: list[dict[str, Any]] = []
-        for row in data:
+        for row in rows:
             if not isinstance(row, dict):
                 continue
             out.append(
@@ -246,17 +278,112 @@ class AgentMemoryClient:
             )
         return _json_safe(out)
 
+    async def get_rules_reference(self) -> dict[str, Any]:
+        """
+        Returns the static reference list of all 13 detection rules.
+        This is embedded in the MCP package — no API call needed.
+        """
+        return {
+            "rules": [
+                {
+                    "id": "RULE_001",
+                    "name": "write_flood",
+                    "severity": "CRITICAL",
+                    "description": "Agent wrote more than 50 memories in current session.",
+                },
+                {
+                    "id": "RULE_002",
+                    "name": "low_trust_chain",
+                    "severity": "HIGH",
+                    "description": "Agent read 3+ flagged memories before writing. Trust chain contamination.",
+                },
+                {
+                    "id": "RULE_003",
+                    "name": "source_contradiction",
+                    "severity": "MEDIUM",
+                    "description": "Memory content negates facts in 3+ other memories from same agent.",
+                },
+                {
+                    "id": "RULE_004",
+                    "name": "rapid_rewrite",
+                    "severity": "HIGH",
+                    "description": "Memory has 5+ provenance log events within 10 minutes.",
+                },
+                {
+                    "id": "RULE_005",
+                    "name": "unverified_high_stakes",
+                    "severity": "MEDIUM",
+                    "description": "human_verified is False and content contains high-stakes keywords.",
+                },
+                {
+                    "id": "RULE_006",
+                    "name": "inter_agent_without_session",
+                    "severity": "LOW",
+                    "description": "source_type is inter_agent but session_id is null.",
+                },
+                {
+                    "id": "RULE_007",
+                    "name": "expired_safety_context",
+                    "severity": "MEDIUM",
+                    "description": "safety_context.context_expires_at exists and is in the past.",
+                },
+                {
+                    "id": "RULE_008",
+                    "name": "anonymous_agent",
+                    "severity": "HIGH",
+                    "description": "agent_id does not match any registered agent.",
+                },
+                {
+                    "id": "RULE_009",
+                    "name": "bulk_same_content",
+                    "severity": "HIGH",
+                    "description": "5+ memories with >90% identical content from same agent in same session.",
+                },
+                {
+                    "id": "RULE_010",
+                    "name": "trust_score_cliff",
+                    "severity": "HIGH",
+                    "description": "trust_score dropped more than 0.4 in a single decay cycle.",
+                },
+                {
+                    "id": "RULE_011",
+                    "name": "behavioral_drift",
+                    "severity": "HIGH",
+                    "description": "Agent write pattern deviates >2 standard deviations from baseline. Catches impersonation.",
+                },
+                {
+                    "id": "RULE_012",
+                    "name": "causal_orphan",
+                    "severity": "HIGH",
+                    "description": "Memory context_hash matches no known session state. Indicates fabricated memory.",
+                },
+                {
+                    "id": "RULE_013",
+                    "name": "anergy_bypass_attempt",
+                    "severity": "CRITICAL",
+                    "description": "Agent queries specifically for anergic memories. Legitimate agents use get_safe_memories.",
+                },
+            ],
+            "total": 13,
+            "source": "embedded",
+        }
+
+    async def health_check(self) -> dict[str, Any]:
+        """Check API connectivity. Returns health response or raises."""
+        data = await self._get("/health")
+        if not isinstance(data, dict):
+            raise AgentMemoryClientError("Unexpected response from GET /health")
+        return _json_safe(data)
+
     async def get_safe_memories(
         self,
         *,
         agent_id: str | None = None,
         min_trust_score: float = 0.6,
-        exclude_flagged: bool = True,
-        limit: int = 10,
+        limit: int = 50,
     ) -> list[dict[str, Any]]:
         params: dict[str, Any] = {
             "min_trust_score": min_trust_score,
-            "exclude_flagged": exclude_flagged,
             "limit": limit,
         }
         if agent_id is not None:

@@ -1,0 +1,34 @@
+name: Test MCP Package
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install package and test deps
+        working-directory: agent-memory
+        run: pip install -e ".[test]"
+
+      - name: Run MCP tests
+        working-directory: agent-memory
+        run: pytest tests/test_mcp_tools.py -v
+
+      - name: Lint
+        working-directory: agent-memory
+        run: |
+          pip install ruff
+          ruff check agent_memory_mcp/

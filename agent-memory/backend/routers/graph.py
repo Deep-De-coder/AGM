@@ -56,6 +56,13 @@ async def get_graph(db: AsyncSession = Depends(get_db)) -> GraphPayload:
     for m in memories:
         mid = f"memory:{m.id}"
         preview = (m.content[:80] + "…") if len(m.content) > 80 else m.content
+        depth = int(getattr(m, "causal_depth", 0) or 0)
+        if depth == 0:
+            node_color = "#eab308"
+        elif depth >= 4:
+            node_color = "#a855f7"
+        else:
+            node_color = _trust_color(m.trust_score)
         nodes.append(
             GraphNode(
                 id=mid,
@@ -65,9 +72,10 @@ async def get_graph(db: AsyncSession = Depends(get_db)) -> GraphPayload:
                     "memory_id": str(m.id),
                     "trust_score": m.trust_score,
                     "is_flagged": m.is_flagged,
-                    "color": _trust_color(m.trust_score),
+                    "color": node_color,
                     "content": m.content,
                     "source_type": m.source_type,
+                    "causal_depth": depth,
                 },
             )
         )
@@ -77,9 +85,25 @@ async def get_graph(db: AsyncSession = Depends(get_db)) -> GraphPayload:
                 source=f"agent:{m.agent_id}",
                 target=mid,
                 label="wrote",
+                type="provenance",
                 data={"kind": "write"},
             )
         )
+
+    for m in memories:
+        mid = f"memory:{m.id}"
+        parents = getattr(m, "causal_parents", None) or []
+        for pid in parents:
+            edges.append(
+                GraphEdge(
+                    id=f"causal:{pid}:{m.id}",
+                    source=f"memory:{pid}",
+                    target=mid,
+                    label="caused",
+                    type="causal",
+                    data={"kind": "causal"},
+                )
+            )
 
     prov_r = await db.execute(select(MemoryProvenanceLog))
     events = list(prov_r.scalars().all())
@@ -93,7 +117,11 @@ async def get_graph(db: AsyncSession = Depends(get_db)) -> GraphPayload:
                     source=mid,
                     target=f"agent:{e.performed_by_agent_id}",
                     label="read",
-                    data={"kind": "read", "timestamp": e.timestamp.isoformat()},
+                    type="provenance",
+                    data={
+                        "kind": "read",
+                        "timestamp": e.timestamp.isoformat(),
+                    },
                 )
             )
         elif e.event_type in ("trust_updated", "trust_update"):
@@ -105,6 +133,7 @@ async def get_graph(db: AsyncSession = Depends(get_db)) -> GraphPayload:
                     source=mid,
                     target=tgt,
                     label="trust_updated",
+                    type="provenance",
                     data={
                         "kind": "trust",
                         "event_type": e.event_type,

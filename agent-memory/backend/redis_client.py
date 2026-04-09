@@ -5,6 +5,12 @@ from redis.asyncio import Redis
 from backend.config import get_settings
 
 _settings = get_settings()
+
+
+def ns_key(name: str) -> str:
+    """Namespace a Redis key using :attr:`Settings.redis_namespace`."""
+    ns = _settings.redis_namespace or ""
+    return f"{ns}{name.lstrip(':')}"
 _redis: Redis | None = None
 
 
@@ -36,3 +42,8 @@ def session_writes_cache_key(agent_id: str, session_id: str) -> str:
 
 def session_flagged_reads_cache_key(agent_id: str, session_id: str) -> str:
     return f"flagged_reads:{agent_id}:{session_id}"
+
+
+def session_outcome_cache_key(session_id: str) -> str:
+    """Redis fallback when no row in ``sessions`` table (success / failed)."""
+    return f"session_outcome:{session_id}"

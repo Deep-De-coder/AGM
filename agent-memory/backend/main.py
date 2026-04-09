@@ -5,9 +5,9 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from backend import redis_client
 from backend.config import get_settings
 from backend.database import engine
-from backend.redis_client import close_redis
 from backend.routers import (
     admin,
     agents,
@@ -25,10 +25,11 @@ settings = get_settings()
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    await redis_client.get_redis()
     start_trust_background_task()
     yield
     await stop_trust_background_task()
-    await close_redis()
+    await redis_client.close_redis()
     await engine.dispose()
 
 
@@ -45,6 +46,7 @@ app.add_middleware(
 app.include_router(agents.router)
 app.include_router(memories.router)
 app.include_router(trust.router)
+app.include_router(trust.alias_router)
 app.include_router(stats.router)
 app.include_router(graph.router)
 app.include_router(violations.router)
