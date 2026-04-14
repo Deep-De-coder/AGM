@@ -2,6 +2,8 @@
 
 Production-grade **provenance-tagged agent memory** service: **FastAPI** + **PostgreSQL** (with **pgvector**) + **Redis**. Every memory write, read, trust change, and soft delete is recorded in `memory_provenance_log`.
 
+> **Docker vs `.env`:** `docker compose up --build` sets **`DATABASE_URL`** / **`REDIS_URL`** for the `api` container in `docker-compose.yml` — no DB entries in **`.env`** are required for that path. Running **uvicorn locally** requires your own Postgres + Redis and a populated **`.env`**. Monorepo overview: [`../docs/DEPLOYMENT.md`](../docs/DEPLOYMENT.md).
+
 ## Architecture
 
 - **PostgreSQL** stores agents, memories (including optional `VECTOR(1536)` embeddings), and the full audit trail.
@@ -68,7 +70,7 @@ The API listens on **http://localhost:8000**. The image runs `alembic upgrade he
 2. **Start PostgreSQL and Redis** (or use Docker only for infra):
 
    ```bash
-   docker compose up -d db redis
+   docker compose up -d postgres redis
    ```
 
 3. **Configure environment**

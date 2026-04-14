@@ -40,6 +40,8 @@ docker compose up --build
 
 Ensure ports `5432`, `6379`, `8000`, and `3000` are free or adjust `docker-compose.yml`.
 
+For when you need **`.env`** vs compose defaults (local API without full stack), see [`../docs/DEPLOYMENT.md`](../docs/DEPLOYMENT.md).
+
 ## Data model and provenance flow
 
 ```

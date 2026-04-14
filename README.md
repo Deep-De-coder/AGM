@@ -1,5 +1,7 @@
 # AGM — Agent Memory
 
+> **Warning — database and Docker:** With **Docker Compose** (`cd agent-memory && docker compose up --build`), Postgres and Redis are included and the API’s **`DATABASE_URL`** is wired in compose — you **do not** need to set DB URLs in **`.env`** for that default run. If you run the API **without** Docker, you **must** provide **PostgreSQL (pgvector) + Redis** and correct **`DATABASE_URL` / `REDIS_URL`** in **`agent-memory/.env`**. The live server **always** needs a real database; skipping that is only possible if you only point MCP or other clients at **someone else’s** hosted API. Details: [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
+
 **MCP package on PyPI:** [agent-memory-mcp](https://pypi.org/project/agent-memory-mcp/)
 
 [![Python 3.11](https://img.shields.io/badge/python-3.11-blue.svg)](https://www.python.org/downloads/)
@@ -53,9 +55,11 @@ Background tasks periodically recompute trust scores and may flag anomalies. See
 
 | Topic | Location |
 |--------|----------|
+| Docker vs local DB, `.env`, MCP without hosting DB | [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) |
+| Research background (design rationale, related work) | [`docs/RESEARCH.md`](docs/RESEARCH.md) |
 | Rules reference & how to add a rule | [`agent-memory/backend/rules/README.md`](agent-memory/backend/rules/README.md) |
 | Contributing (tests, Docker, model overview) | [`agent-memory/CONTRIBUTING.md`](agent-memory/CONTRIBUTING.md) |
-| Service README (ports, API highlights, dev) | [`agent-memory/README.md`](agent-memory/README.md) |
+| Service README (ports, API highlights, dev, MCP) | [`agent-memory/README.md`](agent-memory/README.md) |
 
 ## MCP (Claude Desktop / Claude Code)
 

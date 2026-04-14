@@ -1,6 +1,8 @@
 # AgentMemory: Provenance-Tagged Memory Infrastructure
 # for Multi-Agent AI Systems
 
+Long-form design and research notes. **Project entry point:** [`README.md`](../README.md) (single readme at repo root).
+
 ---
 
 ## SECTION 1: THE PROBLEM
