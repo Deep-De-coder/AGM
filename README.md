@@ -3,7 +3,7 @@
 **MCP package on PyPI:** [agent-memory-mcp](https://pypi.org/project/agent-memory-mcp/)
 
 [![Python 3.11](https://img.shields.io/badge/python-3.11-blue.svg)](https://www.python.org/downloads/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 Monorepo for **agent-memory**: a FastAPI service with PostgreSQL (pgvector), Redis, a trust-decay engine, policy rules, optional React dashboard, and an MCP package for tool integrations.
 
@@ -79,3 +79,5 @@ Example Claude Desktop snippet:
 ```
 
 Replace `OWNER/REPO` in the Quick start `git clone` URL with your GitHub org and repository name after publishing.
+
+**License:** [MIT](LICENSE). For the full legal text plus non-binding author requests (citation when you share work publicly, and a quick heads-up for commercial use), see [`LICENSE`](LICENSE).
