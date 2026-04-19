@@ -1,5 +1,7 @@
 # Deployment and runtime requirements
 
+Overview: [`README.md`](../README.md).
+
 This document summarizes how **PostgreSQL**, **Redis**, and **environment variables** fit together for AGM (agent-memory). It aligns with `agent-memory/docker-compose.yml`, `agent-memory/.env.example`, and the “Local development” section of [`agent-memory/README.md`](../agent-memory/README.md).
 
 ## Docker Compose (recommended)
