@@ -1,4 +1,4 @@
-# Deployment and runtime requirements
+# Deployment and Runtime Requirements
 
 Overview and quick start: [`README.md`](../README.md).
 
