@@ -4,7 +4,7 @@ Overview and Quick Start: [`README.md`](../README.md).
 
 This document summarizes how **PostgreSQL**, **Redis**, and **environment variables** fit together for AGM (agent-memory). It aligns with `agent-memory/docker-compose.yml`, `agent-memory/.env.example`, and the “Local development” section of [`agent-memory/README.md`](../agent-memory/README.md).
 
-## Docker Compose (recommended)
+## Docker Compose (Recommended)
 
 - Compose starts **PostgreSQL (pgvector)**, **Redis**, the **API**, and the **dashboard** together.
 - The `api` service receives **`DATABASE_URL`** and **`REDIS_URL`** from `docker-compose.yml`. You do **not** need to copy `.env` or set a custom DB URL for the default stack to work.
