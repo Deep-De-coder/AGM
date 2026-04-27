@@ -118,21 +118,53 @@ export type AgentListResponse = {
   offset: number;
 };
 
+export type GraphNode = {
+  id: string;
+  kind: string;
+  label: string;
+  data: Record<string, unknown>;
+};
+
+export type GraphEdge = {
+  id: string;
+  source: string;
+  target: string;
+  label: string;
+  type?: string;
+  data: Record<string, unknown>;
+};
+
 export type GraphPayload = {
-  nodes: {
-    id: string;
-    kind: string;
-    label: string;
-    data: Record<string, unknown>;
-  }[];
-  edges: {
-    id: string;
-    source: string;
-    target: string;
-    label: string;
-    type?: string;
-    data: Record<string, unknown>;
-  }[];
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+};
+
+export type IngestResponse = {
+  project_name: string;
+  root_memory_id: string;
+  files_ingested: number;
+  edges_created: number;
+  agent_id: string;
+  ingested_at: string;
+};
+
+export type LearnResponse = {
+  agent_id: string;
+  synthesis_memory_id: string;
+  files_learned: number;
+  core_files: string[];
+  entry_points: string[];
+  causal_depth_of_understanding: number;
+};
+
+export type ProjectStatus = {
+  project_name: string;
+  root_memory_id: string | null;
+  agent_id: string | null;
+  file_count: number;
+  ingested_at: string | null;
+  last_updated: string | null;
+  memory_count: number;
 };
 
 export type AgentDetail = {
@@ -270,6 +302,39 @@ export const api = {
   agent: (id: string) =>
     fetchJson<AgentDetail>(`/agents/${encodeURIComponent(id)}`),
   graph: () => fetchJson<GraphPayload>("/graph"),
+
+  getGraph3D: (params: {
+    project_name?: string;
+    show_3d?: boolean;
+    node_types?: string;
+  }) => {
+    const p = new URLSearchParams();
+    if (params.project_name) p.set("project_name", params.project_name);
+    if (params.show_3d) p.set("show_3d", "true");
+    if (params.node_types) p.set("node_types", params.node_types);
+    const q = p.toString();
+    return fetchJson<GraphPayload>(`/graph${q ? `?${q}` : ""}`);
+  },
+
+  ingestProject: (data: {
+    project_path: string;
+    agent_id: string;
+    project_name: string;
+    file_extensions: string[];
+  }) =>
+    fetchJson<IngestResponse>("/project/ingest", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  learnProject: (project_name: string, agent_id: string) =>
+    fetchJson<LearnResponse>(`/project/${encodeURIComponent(project_name)}/learn`, {
+      method: "POST",
+      body: JSON.stringify({ agent_id }),
+    }),
+
+  getProjectStatus: (project_name: string) =>
+    fetchJson<ProjectStatus>(`/project/${encodeURIComponent(project_name)}/status`),
   runTrustDecay: () =>
     fetchJson<Record<string, number>>("/admin/run-trust-decay", {
       method: "POST",
