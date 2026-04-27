@@ -14,6 +14,7 @@ from backend.routers import (
     graph,
     memories,
     notifications,
+    project,
     stats,
     trust,
     violations,
@@ -52,6 +53,7 @@ app.include_router(graph.router)
 app.include_router(violations.router)
 app.include_router(admin.router)
 app.include_router(notifications.router)
+app.include_router(project.router, prefix="/project", tags=["Project Graph"])
 
 
 @app.get("/health")
