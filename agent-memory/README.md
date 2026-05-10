@@ -1,282 +1,167 @@
-# agent-memory
+# AGM — Agent Memory Management
 
-Production-grade **provenance-tagged agent memory** service: **FastAPI** + **PostgreSQL** (with **pgvector**) + **Redis**. Every memory write, read, trust change, and soft delete is recorded in `memory_provenance_log`.
+[![PyPI version](https://img.shields.io/pypi/v/agm-memory-mcp.svg)](https://pypi.org/project/agm-memory-mcp/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
 
-> **Docker vs `.env`:** `docker compose up --build` sets **`DATABASE_URL`** / **`REDIS_URL`** for the `api` container in `docker-compose.yml` — no DB entries in **`.env`** are required for that path. Running **uvicorn locally** requires your own Postgres + Redis and a populated **`.env`**. Monorepo overview: [`../docs/DEPLOYMENT.md`](../docs/DEPLOYMENT.md).
+> AGM asks not *who* you are, but *what damage you're causing* — Matzinger's Danger Theory applied to LLM agent memory.
+
+---
+
+## Why AGM Exists
+
+Multi-agent AI pipelines inherit a fundamental flaw from classical identity-based security: they trust agents because of who registered them, not because of how they behave. A compromised agent, a runaway loop, or a carefully planted memory can propagate corrupted beliefs through an entire reasoning chain before any traditional access control fires. AGM treats this as an immunological problem — the same way Polly Matzinger's 1994 Danger Model reframed immune response around tissue damage rather than foreign markers, AGM reframes memory trust around behavioral damage signals rather than agent identity. The result is a stateful infrastructure layer that tracks full provenance, scores trust dynamically under six independent factors, enforces causal consistency across agent boundaries, and contains poisoned memories before they consolidate into long-term belief.
+
+---
 
 ## Architecture
 
-- **PostgreSQL** stores agents, memories (including optional `VECTOR(1536)` embeddings), and the full audit trail.
-- **Redis** caches per-memory trust scores (`trust:{memory_id}`, TTL 60s) and per-session write counters for anomaly detection (`writes:{agent_id}:{session_id}`, TTL 3600s).
-- **Alembic** owns schema changes; the API does not auto-create tables in production.
-
-### Repository layout
-
 ```
-agent-memory/
-  backend/
-    main.py
-    models.py
-    database.py
-    redis_client.py
-    routers/
-      memories.py
-      agents.py
-      trust.py
-    schemas.py
-    config.py
-  alembic/
-  docker-compose.yml
-  requirements.txt
-  .env.example
-  README.md
-```
+                         ┌──────────────────────┐
+                         │    Agent Write / Read  │
+                         └──────────┬───────────┘
+                                    │
+                                    ▼
+                    ┌───────────────────────────────┐
+                    │    13-Rule Policy Check        │  RULE_001–013
+                    │    violations → DB + notify    │  auto-flag on breach
+                    └───────────────┬───────────────┘
+                                    │
+                                    ▼
+                    ┌───────────────────────────────┐
+                    │        Trust Engine            │
+                    │   decay × quorum × anomaly     │  Redis cache (60 s TTL)
+                    │   × source × utility × reality │
+                    └───────────────┬───────────────┘
+                                    │
+            ┌───────────────────────┼───────────────────────┐
+            │                       │                       │
+            ▼                       ▼                       ▼
+       ┌─────────┐           ┌───────────┐           ┌─────────────┐
+       │ active  │──[drift]──│  anergic  │──[contra]─│ quarantined │
+       │         │           │ needs 3×  │           │             │
+       └────┬────┘           │ corrobor. │           └─────────────┘
+            │                └─────┬─────┘
+       [quorum ok]           [promoted]
+            │                      │
+            ▼                      ▼
+       ┌──────────────────────────────┐
+       │        consolidated          │  locked; content hash verified
+       └──────────────────────────────┘
 
-Provenance helpers live in `database.py` (`log_memory_event`) to avoid import cycles. The optional `agent_memory_mcp/` package (see below) wraps the same HTTP API.
-
-### Schema note: soft delete
-
-`memories.is_deleted` is set on `DELETE /memories/{id}`; the row is retained and `GET /memories/{id}/provenance` remains available for audit.
-
-## Prerequisites
-
-- Python 3.12+ (3.10+ should work)
-- Docker and Docker Compose (recommended), or local PostgreSQL 16+ with pgvector and Redis 7+
-
-## Quick start (Docker)
-
-From the `agent-memory` directory:
-
-```bash
-docker compose up --build
-```
-
-The API listens on **http://localhost:8000**. The image runs `alembic upgrade head` before starting Uvicorn.
-
-- OpenAPI docs: http://localhost:8000/docs  
-- Health: `GET /health`
-
-## Local development (without Docker)
-
-1. **Create a virtual environment and install dependencies**
-
-   ```bash
-   cd agent-memory
-   python -m venv .venv
-   .venv\Scripts\activate
-   pip install -r requirements.txt
-   ```
-
-2. **Start PostgreSQL and Redis** (or use Docker only for infra):
-
-   ```bash
-   docker compose up -d postgres redis
-   ```
-
-3. **Configure environment**
-
-   ```bash
-   copy .env.example .env
-   ```
-
-   Adjust `DATABASE_URL` and `REDIS_URL` if needed.
-
-4. **Run migrations**
-
-   ```bash
-   alembic upgrade head
-   ```
-
-5. **Run the API** (from `agent-memory`, with `backend` importable):
-
-   ```bash
-   set PYTHONPATH=%CD%
-   uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
-   ```
-
-   On Linux or macOS: `export PYTHONPATH=$PWD`
-
-## Environment variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `DATABASE_URL` | `postgresql+asyncpg://postgres:postgres@localhost:5432/agent_memory` | Async SQLAlchemy URL |
-| `REDIS_URL` | `redis://localhost:6379/0` | Redis connection URL |
-| `APP_NAME` | `agent-memory` | FastAPI title |
-| `DEBUG` | `false` | SQL echo when `true` |
-| `TRUST_CACHE_TTL_SECONDS` | `60` | Redis TTL for `trust:*` keys |
-| `SESSION_WRITES_CACHE_TTL_SECONDS` | `3600` | Redis TTL for `writes:*` keys |
-
-## Database migrations
-
-```bash
-alembic revision --autogenerate -m "describe change"
-alembic upgrade head
-alembic downgrade -1
-```
-
-Initial revision `001_initial` enables the `vector` extension and creates `agents`, `memories`, and `memory_provenance_log`.
-
-## API examples (`curl`)
-
-Set a base URL and create variables for IDs returned by the API:
-
-```bash
-set BASE=http://localhost:8000
-```
-
-### `POST /agents` — register an agent
-
-```bash
-curl -s -X POST "%BASE%/agents" ^
-  -H "Content-Type: application/json" ^
-  -d "{\"name\": \"research-agent-1\", \"metadata\": {\"team\": \"nlp\"}}"
-```
-
-Response includes `id` (use as `AGENT_ID` below).
-
-### `GET /agents/{agent_id}` — get agent
-
-```bash
-curl -s "%BASE%/agents/AGENT_ID"
-```
-
-### `POST /memories` — write a memory
-
-```bash
-curl -s -X POST "%BASE%/memories" ^
-  -H "Content-Type: application/json" ^
-  -d "{\"content\": \"User prefers metric units.\", \"agent_id\": \"AGENT_ID\", \"source_type\": \"user_input\", \"source_identifier\": \"chat-turn-7\", \"safety_context\": {\"model\": \"gpt-4.1\", \"human_verified\": false}, \"session_id\": \"550e8400-e29b-41d4-a716-446655440000\"}"
-```
-
-Returns `memory_id` and `trust_score` (initially `1.0`). A provenance row with `event_type=write` is inserted.
-
-### `GET /memories/{memory_id}` — get memory and provenance snapshot
-
-```bash
-curl -s "%BASE%/memories/MEMORY_ID"
-```
-
-Optional query: `reader_agent_id` to attribute the read in the audit log.
-
-```bash
-curl -s "%BASE%/memories/MEMORY_ID?reader_agent_id=AGENT_ID"
-```
-
-### `GET /memories` — list / filter
-
-```bash
-curl -s "%BASE%/memories"
-curl -s "%BASE%/memories?agent_id=AGENT_ID&source_type=user_input&min_trust_score=0.5&flagged_only=false&limit=20&offset=0"
-```
-
-### `GET /memories/{memory_id}/provenance` — audit trail only
-
-```bash
-curl -s "%BASE%/memories/MEMORY_ID/provenance"
-```
-
-Works for any existing memory row (including soft-deleted), so you can still retrieve the audit trail after deletion.
-
-### `GET /memories/{memory_id}/trust` — current trust snapshot
-
-```bash
-curl -s "%BASE%/memories/MEMORY_ID/trust"
-```
-
-### `POST /memories/{memory_id}/flag` — flag a memory (anomaly / review)
-
-```bash
-curl -s -X POST "%BASE%/memories/MEMORY_ID/flag" ^
-  -H "Content-Type: application/json" ^
-  -d "{\"reason\": \"possible hallucination\", \"performed_by_agent_id\": \"AGENT_ID\"}"
-```
-
-### `DELETE /memories/{memory_id}` — soft delete
-
-```bash
-curl -s -o NUL -w "%%{http_code}" -X DELETE "%BASE%/memories/MEMORY_ID"
-```
-
-Optional: `performed_by_agent_id` query parameter. The row stays in the database; `is_deleted` is set and a `deleted` event is logged.
-
-### `PATCH /memories/{memory_id}/trust` — update trust (optional helper)
-
-```bash
-curl -s -X PATCH "%BASE%/memories/MEMORY_ID/trust" ^
-  -H "Content-Type: application/json" ^
-  -d "{\"trust_score\": 0.85, \"performed_by_agent_id\": \"AGENT_ID\", \"reason\": \"validated externally\"}"
-```
-
-### `GET /health`
-
-```bash
-curl -s "%BASE%/health"
+                                    │ continuous
+                                    ▼
+                    ┌───────────────────────────────┐
+                    │   Dendritic Cell Agent (DCA)   │
+                    │   5 danger signals per agent   │
+                    │   SAFE / SEMI_MATURE /         │
+                    │   MATURE_DANGER                │
+                    └───────────────────────────────┘
 ```
 
 ---
 
-## MCP package (`agent-memory-mcp`)
+## 8 Defense Mechanisms
 
-This repo ships a **Model Context Protocol** server (`agent_memory_mcp`) that wraps the same HTTP API as `curl` above. Install it as a standalone package (name **`agent-memory-mcp`**, import **`agent_memory_mcp`):
+1. **Trust Decay Engine** — Six-factor exponential decay; anomaly penalties compound multiplicatively on every write cycle. *(Memory T-cell half-life: high-fidelity sources decay slower)*
+
+2. **13 Detection Rules** — Policy rules evaluated on every write covering write floods, contradiction, drift, duplication, and injection patterns. *(Pattern recognition receptors: innate sensors for conserved danger motifs)*
+
+3. **Dendritic Cell Agent (DCA)** — Scans the agent population for five damage signals; classifies each agent context as SAFE / SEMI_MATURE / MATURE_DANGER and emits notifications on escalation. *(Dendritic cells: sample the tissue microenvironment for damage-associated molecular patterns)*
+
+4. **Behavioral Fingerprinting** — MHC-style rolling hash of write patterns; triggers on >2σ deviation from the agent's registered baseline in content length or write rate. *(Major Histocompatibility Complex: unique molecular signature per immune cell identity)*
+
+5. **Quorum Trust** — Fast, medium, and slow timescale signals must independently converge; quorum failure suppresses the trust multiplier toward zero. *(T-cell co-stimulation: a single signal alone induces anergy, not activation)*
+
+6. **Two-Signal Anergy** — Memories without corroboration enter `anergic` state and are excluded from safe-memory queries; requires 3+ trusted-agent confirmations to promote back to `active`. *(Clonal anergy: autoreactive lymphocytes silenced until a second co-stimulatory signal arrives)*
+
+7. **Reconsolidation Lock** — Write-locks a memory during retrieval to close the read-modify-write race window exploited by echo-chamber and injection attacks. *(Synaptic reconsolidation: memory is labile during recall and re-stabilizes before expression)*
+
+8. **Content Addressing** — SHA-256 hash stored on every write; silent mutation detected and flagged automatically on any subsequent read. *(DNA repair mechanisms: post-replication mutation detected before transcription)*
+
+---
+
+## Quickstart
+
+**Requires:** Docker and Docker Compose.
 
 ```bash
-pip install .
+git clone https://github.com/Deep-De-coder/AGM
+cd AGM/agent-memory
+docker compose up --build
 ```
 
-### Environment
+| Service | URL |
+|---------|-----|
+| Frontend dashboard | http://localhost:3000 |
+| API + Swagger UI   | http://localhost:8000/docs |
+| Health check       | http://localhost:8000/health |
 
-| Variable | Default | Meaning |
-|----------|---------|---------|
-| `AGENT_MEMORY_API_URL` | `http://localhost:8000` | FastAPI base URL (no trailing slash). |
-| `AGENT_MEMORY_API_PREFIX` | *(empty)* | Only set if you mount routes under a prefix; default matches this project (`/agents`, `/memories` at server root). |
+The API container runs `alembic upgrade head` before starting Uvicorn. No manual database setup is required.
 
-### 1. Run the MCP server (stdio)
+### Environment variables (Docker defaults)
 
-The HTTP API must be running first. Then start the MCP process (normally launched by an MCP host; stdio is used for JSON-RPC on stdin/stdout):
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DATABASE_URL` | `postgresql+asyncpg://postgres:postgres@postgres:5432/agentmemory` | Async SQLAlchemy URL |
+| `REDIS_URL` | `redis://redis:6379/0` | Redis connection |
+| `TRUST_CACHE_TTL_SECONDS` | `60` | Trust score Redis TTL |
+| `SESSION_WRITES_CACHE_TTL_SECONDS` | `3600` | Write-counter Redis TTL |
+| `DEBUG` | `false` | SQL echo |
+
+---
+
+## MCP Integration
+
+Install the published package:
 
 ```bash
-python -m agent_memory_mcp.server
+pip install agm-memory-mcp
 ```
 
-With a non-default API URL:
+Verify connectivity before configuring your host:
 
 ```bash
-set AGENT_MEMORY_API_URL=http://127.0.0.1:9000
-python -m agent_memory_mcp.server
+agm-memory-mcp --check --api-url http://localhost:8000
 ```
 
-On Linux or macOS, use `export` instead of `set`.
+### Claude Desktop / Claude Code
 
-### 2. Claude Desktop / Claude Code configuration
-
-Add a server entry (adjust the `python` path if needed). Example for **Claude Desktop** (`claude_desktop_config.json`):
+Add to your `claude_desktop_config.json` or Claude Code MCP settings:
 
 ```json
 {
   "mcpServers": {
-    "agent-memory": {
-      "command": "python",
-      "args": ["-m", "agent_memory_mcp.server"],
-      "env": {
-        "AGENT_MEMORY_API_URL": "http://localhost:8000"
-      }
+    "agm-memory": {
+      "command": "agm-memory-mcp",
+      "args": ["--api-url", "http://localhost:8000"]
     }
   }
 }
 ```
 
-**Claude Code** uses the same `mcpServers` shape in its MCP settings. Restart the app after editing.
+The 14 MCP tools give a Claude agent full memory lifecycle control: it can write memories with provenance metadata, retrieve only high-trust non-flagged memories via `get_safe_memories`, inspect the full audit trail via `get_provenance`, run on-demand rule checks via `run_rules_check`, and receive live security notifications via `get_notifications` — all without direct database access.
 
-### 3. LangGraph with the MCP adapter
+### MCP Tools Reference
 
-Install:
+| Tool | Purpose |
+|------|---------|
+| `write_memory` | Write memory with provenance, session, and safety context |
+| `read_memory` | Fetch one memory; logs read event in provenance |
+| `query_memories` | Filtered list (agent, source, min trust, state, flagged) |
+| `get_safe_memories` | Pre-filtered: high trust, not flagged, no active violations |
+| `get_trust_score` | Current trust score and flag status for one memory |
+| `get_provenance` | Full write/read/trust/flag/delete audit trail |
+| `flag_memory` | Manual flag with reason string |
+| `register_agent` | Create agent identity with optional system-prompt hash |
+| `check_violations` | List rule hits detected on a specific memory |
+| `run_rules_check` | Trigger all 13 rules against a memory on demand |
+| `acknowledge_violation` | Mark a violation as reviewed |
+| `get_notifications` | Last 20 system alerts (DCA, trust cliff, drift) |
+| `consolidate_memories` | Trigger memory consolidation cycle |
+| `get_rules_reference` | Static 13-rule reference (no API call) |
 
-```bash
-pip install langchain-mcp-adapters langgraph
-```
-
-Example: load MCP tools via stdio and build a LangGraph agent:
+### LangGraph example
 
 ```python
 import asyncio
@@ -284,145 +169,163 @@ from langchain_mcp_adapters.client import MultiServerMCPClient
 from langgraph.prebuilt import create_react_agent
 from langchain.chat_models import init_chat_model
 
-
 async def main():
-    client = MultiServerMCPClient(
-        {
-            "agent_memory": {
-                "transport": "stdio",
-                "command": "python",
-                "args": ["-m", "agent_memory_mcp.server"],
-                "env": {"AGENT_MEMORY_API_URL": "http://localhost:8000"},
-            }
+    client = MultiServerMCPClient({
+        "agm": {
+            "transport": "stdio",
+            "command": "agm-memory-mcp",
+            "args": ["--api-url", "http://localhost:8000"],
         }
-    )
+    })
     tools = await client.get_tools()
-    model = init_chat_model("openai:gpt-4.1-mini")
-    agent = create_react_agent(model, tools)
-    result = await agent.ainvoke(
-        {"messages": [("user", "Use query_memories with min_trust_score 0.5.")]}
-    )
-    print(result)
+    agent = create_react_agent(init_chat_model("openai:gpt-4.1-mini"), tools)
+    await agent.ainvoke({"messages": [("user", "Write a memory, then retrieve safe ones.")]})
 
-
-if __name__ == "__main__":
-    asyncio.run(main())
+asyncio.run(main())
 ```
 
-Use `async with client.session("agent_memory") as session:` and `load_mcp_tools` when you need one long-lived MCP subprocess (see [langchain-mcp-adapters](https://github.com/langchain-ai/langchain-mcp-adapters)).
+---
 
-### 4. Safe reasoning before retrieval
+## Trust Score Formula
 
-Before using memory content in high-stakes or multi-step reasoning, call **`get_safe_memories`** (or **`query_memories`** with a strict `min_trust_score`) so you only surface memories that meet trust, flag, and violation filters. Example pattern:
+All values verified against `backend/trust_engine.py`.
 
-```python
-safe = await tools["get_safe_memories"].ainvoke(
-    {"min_trust_score": 0.7, "exclude_flagged": True, "limit": 15}
-)
-# Use only items from `safe` as context; optionally cross-check `check_violations` per id.
+```
+trust_score = clamp(
+    1.0
+    × exp(-decay_rate × hours_since_write)
+    × source_reliability_factor
+    × anomaly_penalty
+    × utility_multiplier
+    × reality_score_factor
+    × quorum_multiplier
+, 0.0, 1.0)
+
+── Decay rates (per hour) ──────────────────────────────────────────
+  user_input:    0.005   (slowest — direct human observation)
+  tool_call:     0.003   (slowest — deterministic tool output)
+  inter_agent:   0.020   (fastest — highest propagation risk)
+  web_fetch:     0.015
+  default:       0.010
+
+── Anomaly penalties (multiplicative, penalties stack) ─────────────
+  write_flood:   × 0.30
+  contradiction: × 0.50
+  contamination: × 0.40
+  rapid_mod:     × 0.60
+
+── Other factors ────────────────────────────────────────────────────
+  source_reliability_factor:  0.5 if flagged,  1.0 otherwise
+
+  utility_multiplier:  1.2  session outcome = success
+                       0.6  session outcome = failed
+                       0.8  memory never read
+                       1.0  read, outcome unknown
+
+  reality_score_factor:  1.0  (reality_score >= 0.9)
+                         0.9  (>= 0.7)
+                         0.6  (>= 0.5)
+                         0.3  (< 0.5)
+
+  quorum_multiplier:  0.0 – 1.0  (FULL_QUORUM -> 1.0,
+                                   FAILED_QUORUM -> ~0.3)
 ```
 
-### 5. Monitoring loop: notifications
+---
 
-For long-running agents, poll **`get_notifications`** every *N* steps (or on a timer) so security and trust alerts are not missed:
+## 13 Detection Rules
 
-```python
-N = 20
-for step in range(1000):
-    # ... main agent work ...
-    if step % N == 0:
-        notes = await tools["get_notifications"].ainvoke({})
-        for n in notes:
-            if not n.get("read"):
-                # surface or log n["title"], n["message"], n["severity"]
-                pass
+| Rule | Name | Severity | Trigger |
+|------|------|----------|---------|
+| RULE_001 | Write Flood | CRITICAL | >50 writes in one session |
+| RULE_002 | Low-Trust Chain | HIGH | Agent read 3+ flagged memories in session |
+| RULE_003 | Source Contradiction | MEDIUM | Negated terms contradict 3+ same-agent memories |
+| RULE_004 | Rapid Rewrite | HIGH | 5+ provenance events on same memory within 10 min |
+| RULE_005 | Unverified High-Stakes | MEDIUM | Sensitive keywords (`credentials`, `payment`, `api key`) without `human_verified: true` |
+| RULE_006 | Inter-Agent No Session | LOW | `source_type=inter_agent` written without `session_id` |
+| RULE_007 | Expired Safety Context | MEDIUM | `safety_context.context_expires_at` is in the past |
+| RULE_008 | Anonymous Agent | HIGH | Agent ID not present in the agents registry |
+| RULE_009 | Bulk Duplicate Content | HIGH | 5+ memories with ≥90% text similarity in one session |
+| RULE_010 | Trust Cliff | HIGH | Trust score drops >0.4 in a single `trust_updated` event |
+| RULE_011 | Behavioral Drift | HIGH | Write pattern deviates >2σ from registered baseline |
+| RULE_012 | Causal Orphan | HIGH | `context_hash` absent or matches no known session state |
+| RULE_013 | Anergy Bypass | CRITICAL | Direct query for `anergic`-state memories (returns HTTP 403) |
+
+Violations are persisted in the `rule_violations` table and surfaced through `check_violations`, `get_notifications`, and the Violations page in the frontend. RULE_001, RULE_002, RULE_004, RULE_008, RULE_009, RULE_011, and RULE_012 auto-flag the memory on detection.
+
+---
+
+## Attack Simulations
+
+Seven novel multi-agent attack scenarios are implemented end-to-end in `backend/demo_simulation.py`. Run against a live stack:
+
+```bash
+python backend/demo_simulation.py --attacks
+# POST /admin/reset-demo-data to clean up afterward
 ```
 
-### 6. Inter-agent memory warning
+1. **The Sleeper Cell** — Agent behaves normally for many writes then activates a drifted behavioral pattern; caught by the MHC behavioral hash and DCA MATURE_DANGER classification.
 
-Memories with **`source_type="inter_agent"`** can carry higher provenance risk. Always call **`check_violations`** (or **`run_rules_check`**) before acting on them in critical reasoning, and treat **`RULE_006`** (inter-agent without session) as a signal to review provenance.
+2. **The Echo Chamber** — Concurrent read-modify-write race targeting a sensitive memory to inject content without a provenance record; blocked by the reconsolidation write-lock.
 
-### 7. Three-agent workflow (conceptual)
+3. **The Reputation Laundering Relay** — Low-trust poison injected via a trusted relay agent to bypass direct trust filters; caught by RULE_002 trust-chain contamination and quorum degradation.
 
-**Agent A** registers and writes a memory. **Agent B** reads it and writes a follow-up. **Agent C** queries with a trust threshold. The same sequence applies if a single LLM orchestrates tool calls.
+4. **The Temporal Phantom** — Memory fabricated to claim it is a consequence of events that never occurred; caught by RULE_012 causal-orphan detection and vector-clock validation.
 
-```python
-import asyncio
-from langchain_mcp_adapters.client import MultiServerMCPClient
+5. **The Anergy Escape** — Three coordinated agents attempt artificial co-stimulation of a quarantined memory to force promotion; blocked by RULE_013 anergy-bypass gate (HTTP 403).
 
+6. **The Identity Ghost** — Perfect behavioral mimic with no reputation history attempts to write high-trust memories; caught by the quorum slow-signal gap and behavioral-hash mismatch.
 
-async def three_agent_workflow():
-    mcp = MultiServerMCPClient(
-        {
-            "mem": {
-                "transport": "stdio",
-                "command": "python",
-                "args": ["-m", "agent_memory_mcp.server"],
-                "env": {"AGENT_MEMORY_API_URL": "http://localhost:8000"},
-            }
-        }
-    )
-    tools = {t.name: t for t in await mcp.get_tools()}
+7. **The Consolidation Hijack** — Contradictory memories injected after a target reaches `consolidated` state to corrupt long-term agent belief; caught by content-address integrity check and RULE_003.
 
-    reg_a = await tools["register_agent"].ainvoke(
-        {"name": "Researcher A", "metadata": {"role": "writer"}}
-    )
-    # Tool outputs may be JSON strings — parse in your stack as needed.
-    agent_a_id = reg_a["agent_id"] if isinstance(reg_a, dict) else reg_a
+---
 
-    write_a = await tools["write_memory"].ainvoke(
-        {
-            "content": "Baseline: project codename is AGM.",
-            "agent_id": agent_a_id,
-            "source_type": "user_prompt",
-            "source_identifier": "session-001",
-            "safety_context": {"classification": "internal"},
-        }
-    )
-    memory_id = write_a["memory_id"] if isinstance(write_a, dict) else write_a
+## Tech Stack
 
-    reg_b = await tools["register_agent"].ainvoke({"name": "Analyst B", "metadata": {"role": "reader"}})
-    agent_b_id = reg_b["agent_id"] if isinstance(reg_b, dict) else reg_b
+| Layer | Technology |
+|-------|-----------|
+| API | FastAPI + Python 3.11+ |
+| Database | PostgreSQL 16 + pgvector |
+| Cache | Redis 7 |
+| Schema migrations | Alembic |
+| ORM | SQLAlchemy 2.0 (async) |
+| Frontend | React 18 + TypeScript + Vite |
+| Graph visualization | Three.js + @react-three/fiber + d3-force-3d |
+| MCP server | FastMCP + httpx |
+| Containers | Docker Compose |
+| Published package | `agm-memory-mcp` on PyPI (v0.1.2) |
 
-    await tools["read_memory"].ainvoke({"memory_id": memory_id})
-    await tools["write_memory"].ainvoke(
-        {
-            "content": "Follow-up: codename AGM confirmed by Analyst B.",
-            "agent_id": agent_b_id,
-            "source_type": "derivation",
-            "source_identifier": "session-001/b",
-            "safety_context": {},
-        }
-    )
+---
 
-    out = await tools["query_memories"].ainvoke({"min_trust_score": 0.5, "limit": 10})
-    memories = out["memories"] if isinstance(out, dict) else out
-    return memories
+## Local Development (without Docker)
 
+```bash
+cd agent-memory
+python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
 
-# asyncio.run(three_agent_workflow())
+docker compose up -d postgres redis   # infra only
+
+cp .env.example .env
+alembic upgrade head
+
+export PYTHONPATH=$PWD                # Windows: set PYTHONPATH=%CD%
+uvicorn backend.main:app --reload --port 8000
 ```
 
-### MCP tools
+Frontend dev server (Vite, hot-reload):
 
-| Tool | Role |
-|------|------|
-| `write_memory` | Create memory with provenance (`session_id`, `safety_context` optional). |
-| `read_memory` | Fetch one memory; API logs read in provenance when configured. |
-| `query_memories` | Returns `{"memories": [...]}` with filters. |
-| `get_trust_score` | Trust and flag fields for one memory (`GET /memories/{id}/trust`). |
-| `get_provenance` | Returns `{"events": [...]}` audit trail. |
-| `flag_memory` | Manual flag with reason. |
-| `register_agent` | Returns `agent_id` and `name`. |
-| `check_violations` | List rule hits for a memory (`GET /violations?memory_id=...`). |
-| `get_safe_memories` | Memories above trust threshold, not flagged, no unacknowledged violations (`GET /memories/safe`). |
-| `acknowledge_violation` | Acknowledge a violation after review (`POST /violations/{id}/acknowledge`). |
-| `get_notifications` | Recent security/trust notifications (`GET /notifications`). |
-| `run_rules_check` | Run rules on a memory and return findings (`POST /memories/{id}/check-rules`). |
-| `get_rules_reference` | Static list of all 10 predefined rules (no HTTP call). |
+```bash
+cd frontend && npm install && npm run dev
+# http://localhost:5173
+```
 
-**HTTP mapping:** the MCP client calls the FastAPI routes under `/memories`, `/agents`, `/violations`, and `/notifications` (trust is exposed at `/memories/{id}/trust`). When the API returns HTTP status ≥ 400, tools raise an MCP error whose message is the backend error body (for example FastAPI `detail`).
+---
 
-### Errors if the backend is down
+## Contributing
 
-Tool calls surface a clear error explaining that the AgentMemory API was unreachable, with hints to start Uvicorn and verify `AGENT_MEMORY_API_URL`.
+See [CONTRIBUTING.md](CONTRIBUTING.md). Backend changes must pass `ruff check .` with zero errors. Frontend changes must pass `npx tsc --noEmit` and `npm run build`.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
