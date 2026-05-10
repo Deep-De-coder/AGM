@@ -1,4 +1,5 @@
 import { NavLink, Route, Routes } from "react-router-dom";
+import { ShieldAlert } from "lucide-react";
 import { NotificationBell } from "./components/NotificationBell";
 import { DashboardPage } from "./pages/DashboardPage";
 import { MemoriesPage } from "./pages/MemoriesPage";
@@ -6,15 +7,17 @@ import { GraphPage } from "./pages/GraphPage";
 import { AgentsPage } from "./pages/AgentsPage";
 import { ViolationsPage } from "./pages/ViolationsPage";
 import { RulesPage } from "./pages/RulesPage";
+import { AttacksPage } from "./pages/AttacksPage";
 import { cn } from "./components/ui";
 
 const nav = [
-  { to: "/", label: "Dashboard" },
-  { to: "/memories", label: "Memories" },
-  { to: "/violations", label: "Violations" },
-  { to: "/graph", label: "Graph" },
-  { to: "/agents", label: "Agents" },
-  { to: "/rules", label: "Rules" },
+  { to: "/", label: "Dashboard", icon: null },
+  { to: "/memories", label: "Memories", icon: null },
+  { to: "/violations", label: "Violations", icon: null },
+  { to: "/graph", label: "Graph", icon: null },
+  { to: "/agents", label: "Agents", icon: null },
+  { to: "/rules", label: "Rules", icon: null },
+  { to: "/attacks", label: "Attacks", icon: ShieldAlert },
 ];
 
 export default function App() {
@@ -31,13 +34,18 @@ export default function App() {
                 end={n.to === "/"}
                 className={({ isActive }) =>
                   cn(
-                    "rounded-lg px-3 py-1.5 text-sm transition-colors",
-                    isActive
-                      ? "bg-zinc-800 text-white"
-                      : "text-zinc-400 hover:text-zinc-200",
+                    "inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm transition-colors",
+                    n.icon
+                      ? isActive
+                        ? "bg-red-950/40 text-red-300"
+                        : "text-red-400 hover:text-red-300"
+                      : isActive
+                        ? "bg-zinc-800 text-white"
+                        : "text-zinc-400 hover:text-zinc-200",
                   )
                 }
               >
+                {n.icon && <n.icon className="h-3.5 w-3.5" />}
                 {n.label}
               </NavLink>
             ))}
@@ -53,6 +61,7 @@ export default function App() {
           <Route path="/agents" element={<AgentsPage />} />
           <Route path="/violations" element={<ViolationsPage />} />
           <Route path="/rules" element={<RulesPage />} />
+          <Route path="/attacks" element={<AttacksPage />} />
         </Routes>
       </main>
     </div>

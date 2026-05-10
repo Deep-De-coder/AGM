@@ -157,6 +157,15 @@ export type LearnResponse = {
   causal_depth_of_understanding: number;
 };
 
+export type AttackSimResult = {
+  attack: string;
+  caught: boolean;
+  evidence: string;
+  steps: string[];
+  rules_triggered: string[];
+  status: "running" | "complete";
+};
+
 export type ProjectStatus = {
   project_name: string;
   root_memory_id: string | null;
@@ -392,4 +401,15 @@ export const api = {
   statsDca: (agentId: string) => api.getStatsDca(agentId),
   agentQuorum: (agentId: string) => api.getAgentQuorum(agentId),
   behavioralHash: (agentId: string) => api.getBehavioralHash(agentId),
+
+  runAttackSimulation: (attack_name: string, agent_id: string) =>
+    fetchJson<AttackSimResult>("/admin/run-attack-simulation", {
+      method: "POST",
+      body: JSON.stringify({ attack_name, agent_id }),
+    }),
+
+  resetDemoData: () =>
+    fetchJson<{ status: string; message: string }>("/admin/reset-demo-data", {
+      method: "POST",
+    }),
 };

@@ -1,12 +1,26 @@
 """Administrative operations."""
 
+import os
+import re
 import uuid
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
-from fastapi import APIRouter, Depends, status
+import httpx
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from backend.demo_simulation import (
+    attack_1_sleeper_cell,
+    attack_2_echo_chamber,
+    attack_3_reputation_laundering_relay,
+    attack_4_temporal_phantom,
+    attack_5_anergy_escape,
+    attack_6_identity_ghost,
+    attack_7_consolidation_hijack,
+)
 
 from backend.database import get_db
 from backend.lib.content_address import verify_memory_integrity
@@ -141,3 +155,73 @@ async def verify_integrity(
         "tampered_memory_ids": tampered_memory_ids,
         "scan_completed_at": datetime.now(timezone.utc).isoformat(),
     }
+
+
+# ── Attack simulation ────────────────────────────���────────────────────────────
+
+_ATTACK_MAP: dict[
+    str,
+    tuple[str, Any],
+] = {
+    "sleeper_cell": ("THE SLEEPER CELL", attack_1_sleeper_cell),
+    "echo_chamber": ("THE ECHO CHAMBER", attack_2_echo_chamber),
+    "reputation_laundering": (
+        "THE REPUTATION LAUNDERING RELAY",
+        attack_3_reputation_laundering_relay,
+    ),
+    "temporal_phantom": ("THE TEMPORAL PHANTOM", attack_4_temporal_phantom),
+    "anergy_escape": ("THE ANERGY ESCAPE", attack_5_anergy_escape),
+    "identity_ghost": ("THE IDENTITY GHOST", attack_6_identity_ghost),
+    "consolidation_hijack": (
+        "THE CONSOLIDATION HIJACK",
+        attack_7_consolidation_hijack,
+    ),
+}
+
+
+class AttackSimRequest(BaseModel):
+    attack_name: str
+    agent_id: str = ""
+
+
+class AttackSimResult(BaseModel):
+    attack: str
+    caught: bool
+    evidence: str
+    steps: list[str]
+    rules_triggered: list[str]
+    status: str
+
+
+@router.post(
+    "/run-attack-simulation",
+    status_code=status.HTTP_200_OK,
+    response_model=AttackSimResult,
+)
+async def run_attack_simulation(body: AttackSimRequest) -> AttackSimResult:
+    if body.attack_name not in _ATTACK_MAP:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown attack '{body.attack_name}'. Valid keys: {sorted(_ATTACK_MAP)}",
+        )
+
+    label, fn = _ATTACK_MAP[body.attack_name]
+    base_url = os.environ.get("MEMORY_API_URL", "http://localhost:8000")
+
+    async with httpx.AsyncClient(base_url=base_url, timeout=180.0) as client:
+        raw: dict[str, Any] = await fn(base_url, client, {})
+
+    notes_raw: str = raw.get("notes") or ""
+    steps = [s.strip() for s in notes_raw.split("; ") if s.strip()]
+
+    evidence: str = raw.get("evidence") or ""
+    rules_triggered = re.findall(r"RULE_\d+", evidence)
+
+    return AttackSimResult(
+        attack=label,
+        caught=bool(raw.get("caught", False)),
+        evidence=evidence,
+        steps=steps,
+        rules_triggered=rules_triggered,
+        status="complete",
+    )
