@@ -9,6 +9,7 @@ import type {
   ProvenanceEvent,
 } from "../api";
 import { Badge, Button, Card, cn } from "./ui";
+import BehavioralDriftChart from "./BehavioralDriftChart";
 
 type AgentDetailPanelProps = {
   agentId: string;
@@ -286,31 +287,6 @@ export function AgentDetailPanel({
     return agent?.behavioral_drift_score ?? 0;
   }, [agent?.behavioral_drift_score, behavioral?.behavioral_drift_score]);
 
-  const driftLabel = useMemo(() => {
-    if (driftScore < 0.2) return "Stable identity";
-    if (driftScore <= 0.4) return "Moderate drift — monitoring";
-    return "HIGH DRIFT — possible impersonation";
-  }, [driftScore]);
-
-  const vectorRows = useMemo(() => {
-    const raw = behavioral?.behavioral_vector;
-    if (!raw || typeof raw !== "object") return [];
-    const wanted = [
-      "avg_content_length",
-      "write_interval_avg",
-      "inter_agent_fraction",
-      "flag_rate",
-      "session_count",
-    ] as const;
-    return wanted
-      .filter((k) => k in raw)
-      .map((k) => {
-        const v = (raw as Record<string, unknown>)[k];
-        const n = typeof v === "number" ? v : Number(v);
-        return { key: k, value: Number.isFinite(n) ? n : 0 };
-      });
-  }, [behavioral?.behavioral_vector]);
-
   async function copyHash() {
     if (!behavioral?.behavioral_hash) return;
     await navigator.clipboard.writeText(behavioral.behavioral_hash);
@@ -448,39 +424,7 @@ export function AgentDetailPanel({
                 )}
               </Card>
 
-              <Card>
-                <div className="mb-2 flex items-center justify-between">
-                  <p className="text-sm">Drift Score</p>
-                  <p className="font-mono text-sm">{driftScore.toFixed(3)}</p>
-                </div>
-                <div className="h-2 w-full rounded bg-zinc-800">
-                  <div
-                    className={cn("h-2 rounded", driftColor(driftScore))}
-                    style={{ width: `${Math.max(0, Math.min(1, driftScore)) * 100}%` }}
-                  />
-                </div>
-                <p className="text-xs mt-2 text-zinc-500">{driftLabel}</p>
-              </Card>
-
-              <Card>
-                <p className="text-sm font-medium mb-2">Behavioral Vector breakdown</p>
-                {vectorRows.length === 0 ? (
-                  <p className="text-xs text-zinc-500">No behavioral vector available</p>
-                ) : (
-                  <table className="w-full text-xs">
-                    <tbody>
-                      {vectorRows.map((row) => (
-                        <tr key={row.key} className="border-b border-zinc-800">
-                          <td className="py-1 text-zinc-400">{row.key}</td>
-                          <td className="py-1 text-right font-mono">
-                            {row.value.toFixed(2)}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )}
-              </Card>
+              <BehavioralDriftChart agentId={agentId} />
 
               <Card>
                 <p className="text-sm font-medium mb-2">Hash History</p>

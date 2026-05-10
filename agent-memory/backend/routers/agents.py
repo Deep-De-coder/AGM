@@ -120,6 +120,22 @@ async def get_behavioral_hash(
     age = 0
     if updated:
         age = int((now - updated).total_seconds())
+
+    bl = agent.behavioral_baseline or DEFAULT_BEHAVIORAL_BASELINE
+    src_dist = dict(bl.get("source_type_distribution", {}))
+    baseline_vector = {
+        "avg_content_length": float(bl.get("avg_content_length", 200.0)),
+        "avg_content_length_std": float(bl.get("std_content_length", 50.0)),
+        "source_type_dist": src_dist,
+        "avg_trust_score_written": 0.8,
+        "write_interval_avg": 60.0,
+        "write_interval_std": 30.0,
+        "session_count": 0.0,
+        "flag_rate": 0.0,
+        "inter_agent_fraction": float(src_dist.get("inter_agent", 0.2)),
+        "avg_safety_context_keys": 0.0,
+    }
+
     return {
         "agent_id": str(agent_id),
         "behavioral_hash": agent.behavioral_hash,
@@ -130,6 +146,7 @@ async def get_behavioral_hash(
         ),
         "behavioral_drift_score": agent.behavioral_drift_score,
         "behavioral_vector": agent.behavioral_vector or {},
+        "baseline_vector": baseline_vector,
         "hash_age_seconds": age,
     }
 

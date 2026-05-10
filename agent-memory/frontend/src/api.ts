@@ -193,6 +193,7 @@ export type BehavioralHashResponse = {
   behavioral_hash_updated_at: string | null;
   behavioral_drift_score: number;
   behavioral_vector: Record<string, unknown> | null;
+  baseline_vector: Record<string, unknown> | null;
   hash_age_seconds: number;
 };
 
