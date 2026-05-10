@@ -7,7 +7,7 @@ name = "agm-memory-mcp"
 version = "0.1.2"
 description = "AGM — Agent Memory Management. Provenance-tagged memory infrastructure for multi-agent AI systems. MCP server with trust scoring, behavioral fingerprinting, and memory poisoning defense."
 readme = "README_PYPI.md"
-license = { text = "MIT" }
+license = "MIT"
 requires-python = ">=3.11"
 authors = [
     { name = "Deep Shahane", email = "esotericdeep@gmail.com" }

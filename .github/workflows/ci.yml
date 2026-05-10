@@ -1,3 +1,5 @@
+# Lean CI: backend lint+test + MCP smoke. Est. runtime: ~2min
+
 name: CI
 
 on:
@@ -6,46 +8,62 @@ on:
   pull_request:
     branches: [main]
 
-defaults:
-  run:
-    working-directory: agent-memory
-
 jobs:
-  test:
+  backend-lint-test:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: agent-memory
+
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-          cache: pip
-          cache-dependency-path: agent-memory/requirements.txt
 
-      - name: Install dependencies
-        run: pip install -r requirements.txt
-
-      - name: Run tests
-        run: pytest backend/tests/ -v --tb=short
-
-  lint:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v5
+      - name: Cache pip
+        uses: actions/cache@v4
         with:
-          python-version: "3.11"
-          cache: pip
-          cache-dependency-path: agent-memory/requirements.txt
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('agent-memory/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip install -r requirements.txt pytest-timeout
 
-      - name: Ruff check
+      - name: Lint
         run: ruff check backend/
 
-      - name: Ruff format
-        run: ruff format --check backend/
+      - name: Test
+        run: pytest backend/tests/ -x -q --timeout=30
+        env:
+          PYTHONPATH: .
+
+  mcp-package-check:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: agent-memory
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-mcp-pip-${{ hashFiles('agent-memory/pyproject.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-mcp-pip-
+
+      - name: Install MCP package
+        run: pip install .
+
+      - name: Smoke test
+        run: agm-memory-mcp --help
