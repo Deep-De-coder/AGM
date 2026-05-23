@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { api } from "../api";
 import type {
   AgentDetail,
@@ -39,12 +39,6 @@ function ago(ts: string | null | undefined): string {
   if (hr < 24) return `${hr}h ago`;
   const day = Math.floor(hr / 24);
   return `${day}d ago`;
-}
-
-function driftColor(score: number): string {
-  if (score < 0.2) return "bg-emerald-500";
-  if (score <= 0.4) return "bg-amber-500";
-  return "bg-red-500";
 }
 
 function signalColor(score: number): string {
@@ -280,13 +274,6 @@ export function AgentDetailPanel({
     };
   }, [agentId]);
 
-  const driftScore = useMemo(() => {
-    if (behavioral?.behavioral_drift_score != null) {
-      return behavioral.behavioral_drift_score;
-    }
-    return agent?.behavioral_drift_score ?? 0;
-  }, [agent?.behavioral_drift_score, behavioral?.behavioral_drift_score]);
-
   async function copyHash() {
     if (!behavioral?.behavioral_hash) return;
     await navigator.clipboard.writeText(behavioral.behavioral_hash);
@@ -360,18 +347,7 @@ export function AgentDetailPanel({
                 </Card>
               )}
 
-              <Card>
-                <div className="mb-2 flex items-center justify-between">
-                  <p className="text-sm">Behavioral drift score</p>
-                  <p className="text-sm font-mono">{driftScore.toFixed(3)}</p>
-                </div>
-                <div className="h-2 w-full rounded bg-zinc-800">
-                  <div
-                    className={cn("h-2 rounded", driftColor(driftScore))}
-                    style={{ width: `${Math.max(0, Math.min(1, driftScore)) * 100}%` }}
-                  />
-                </div>
-              </Card>
+              <BehavioralDriftChart agentId={agentId} />
 
               <Card>
                 <p className="text-xs text-zinc-500 mb-2">DCA Context</p>

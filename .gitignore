@@ -33,6 +33,9 @@ agent-memory/frontend/.vite/
 # Local MCP / packaging
 agent-memory/agent_memory_mcp.egg-info/
 
+# Benchmark reports (keep directory structure, ignore generated reports)
+agent-memory/benchmark_results/*.md
+
 # OS
 .DS_Store
 Thumbs.db
