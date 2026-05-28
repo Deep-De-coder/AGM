@@ -8,6 +8,7 @@ import {
   YAxis,
 } from "recharts";
 import { api } from "../api";
+import { ImmunologyPanel } from "../components/ImmunologyPanel";
 import { Badge, Card, cn } from "../components/ui";
 
 function trustColor(score: number) {
@@ -199,6 +200,8 @@ export function DashboardPage() {
           )}
         </div>
       )}
+
+      <ImmunologyPanel />
 
       {s?.danger_signals && (
         <>
