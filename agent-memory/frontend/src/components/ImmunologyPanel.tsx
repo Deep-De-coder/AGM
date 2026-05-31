@@ -117,6 +117,7 @@ export function ImmunologyPanel() {
     queryKey: ["agents"],
     queryFn: api.agents,
     refetchInterval: 60_000,
+    refetchOnWindowFocus: false,
   });
 
   const agents = agentsQuery.data ?? [];
@@ -127,6 +128,7 @@ export function ImmunologyPanel() {
     queryFn: () => api.getStatsDca(activeAgentId as string),
     enabled: activeAgentId !== null,
     refetchInterval: 15_000,
+    refetchOnWindowFocus: false,
   });
 
   // Tick "seconds ago" every second; cleanup stops when component unmounts
@@ -300,6 +302,9 @@ export function ImmunologyPanel() {
             </p>
             <p className="text-xs text-zinc-400 text-center max-w-48 leading-relaxed">
               {contextInterpretation(dca.net_context)}
+            </p>
+            <p className="text-[10px] text-zinc-600 tabular-nums">
+              D {dca.danger_score.toFixed(2)} · S {dca.safe_score.toFixed(2)}
             </p>
           </div>
         </div>
