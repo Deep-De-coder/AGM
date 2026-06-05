@@ -3,8 +3,7 @@ import { ChevronRight } from "lucide-react";
 import { useState } from "react";
 import { api } from "../api";
 import { AgentDetailPanel } from "../components/AgentDetailPanel";
-import { Badge, Card } from "../components/ui";
-import { cn } from "../components/ui";
+import { Badge, Card, cn } from "../components/ui";
 
 function dcaBadge(ctx: string | undefined) {
   const c = ctx ?? "SAFE";
