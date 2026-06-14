@@ -22,7 +22,8 @@ from backend.demo_simulation import (
     attack_7_consolidation_hijack,
 )
 
-from backend.database import get_db
+from backend.database import AsyncSessionLocal, get_db
+from backend.dendritic_cell import DendriticCellAgent
 from backend.lib.content_address import verify_memory_integrity
 from backend.models import (
     Agent,
@@ -49,6 +50,14 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 @router.post("/run-trust-decay", status_code=status.HTTP_200_OK)
 async def run_trust_decay(db: AsyncSession = Depends(get_db)) -> dict[str, int | float]:
     return await run_trust_pass(db, manual=True)
+
+
+@router.post("/run-dca-scan", status_code=status.HTTP_200_OK)
+async def run_dca_scan() -> dict[str, object]:
+    redis = await get_redis()
+    dca = DendriticCellAgent(AsyncSessionLocal, redis)
+    samples = await dca.run_population_scan()
+    return {"status": "complete", "agents_scanned": len(samples)}
 
 
 class SessionSeedBody(BaseModel):

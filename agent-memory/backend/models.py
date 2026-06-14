@@ -95,7 +95,9 @@ class Memory(Base):
     )
     flag_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     session_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), nullable=True
+        UUID(as_uuid=True),
+        ForeignKey("sessions.id", ondelete="SET NULL"),
+        nullable=True,
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

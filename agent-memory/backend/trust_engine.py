@@ -196,6 +196,7 @@ def _build_trust_breakdown(
     anomaly_penalty: float,
     utility_multiplier: float,
     reality_score_factor: float,
+    quorum_multiplier: float,
     triggered_rules: list[str],
 ) -> dict[str, Any]:
     return {
@@ -205,10 +206,12 @@ def _build_trust_breakdown(
         "anomaly_penalty": anomaly_penalty,
         "utility_multiplier": utility_multiplier,
         "reality_score_factor": reality_score_factor,
+        "quorum_multiplier": quorum_multiplier,
         "triggered_rules": triggered_rules,
         "formula": (
             "base_score * time_decay_factor * source_reliability_factor * "
-            "anomaly_penalty * utility_multiplier * reality_score_factor"
+            "anomaly_penalty * utility_multiplier * reality_score_factor * "
+            "quorum_multiplier"
         ),
     }
 
@@ -704,6 +707,7 @@ async def run_trust_pass(
             anomaly_penalty=anomaly_penalty,
             utility_multiplier=utility_mult,
             reality_score_factor=reality_mult,
+            quorum_multiplier=q.memory_trust_multiplier,
             triggered_rules=rule_names,
         )
 

@@ -295,11 +295,28 @@ def _check_causal_orphan(ctx: RuleContext) -> RuleViolation | None:
     return None
 
 
-# --- RULE_013 anergy_bypass_attempt (write-time: never fires) ------------
+# --- RULE_013 anergy_bypass_attempt ----------------------------------------
+# Fires in batch scans when an anergic/quarantined memory has been read.
+# The 403-enforcement path in list_memories is unchanged; this is the
+# detection/logging path so collect_violations() also captures the event.
 
 
 def _check_anergy_bypass_attempt(ctx: RuleContext) -> RuleViolation | None:
-    return None
+    if ctx.memory.memory_state not in ("anergic", "quarantined"):
+        return None
+    has_read = any(e.event_type == "read" for e in ctx.provenance_events)
+    if not has_read:
+        return None
+    return _violation(
+        ctx,
+        "RULE_013",
+        "CRITICAL",
+        (
+            "Agent accessed a memory in anergic or quarantined state — "
+            "possible bypass attempt."
+        ),
+        auto_flagged=True,
+    )
 
 
 # --- RULE_007 expired_safety_context -------------------------------------
