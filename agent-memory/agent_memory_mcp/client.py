@@ -141,6 +141,7 @@ class AgentMemoryClient:
         source_identifier: str,
         safety_context: dict[str, Any] | None = None,
         session_id: str | None = None,
+        idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         body: dict[str, Any] = {
             "content": content,
@@ -151,7 +152,10 @@ class AgentMemoryClient:
         }
         if session_id is not None:
             body["session_id"] = session_id
-        data = await self._request("POST", "/memories", json=body)
+        kwargs: dict[str, Any] = {"json": body}
+        if idempotency_key is not None:
+            kwargs["headers"] = {"X-Idempotency-Key": idempotency_key}
+        data = await self._request("POST", "/memories", **kwargs)
         if not isinstance(data, dict):
             raise AgentMemoryClientError("Unexpected response shape from POST /memories")
         out = {

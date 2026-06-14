@@ -1,5 +1,6 @@
 """Agent memory service — FastAPI application entrypoint."""
 
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -22,11 +23,26 @@ from backend.routers import (
 from backend.trust_engine import start_trust_background_task, stop_trust_background_task
 
 settings = get_settings()
+_logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    await redis_client.get_redis()
+    redis = await redis_client.get_redis()
+
+    # Informational: warn if stale checkpoints exist (indicates a previous crash)
+    from backend.lib.checkpoint import load_checkpoint
+
+    for task_name in ("trust_decay", "dca_scan"):
+        cp = await load_checkpoint(redis, task_name)
+        if cp:
+            _logger.warning(
+                "Stale checkpoint found for '%s' on startup: %s — "
+                "previous run may have crashed; background task will resume.",
+                task_name,
+                cp,
+            )
+
     start_trust_background_task()
     yield
     await stop_trust_background_task()

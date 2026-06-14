@@ -250,6 +250,8 @@ class DendriticCellAgent:
         return sample
 
     async def run_population_scan(self) -> list[DCASample]:
+        from backend.lib.checkpoint import clear_checkpoint, load_checkpoint, save_checkpoint
+
         now = datetime.now(timezone.utc)
         async with self.db_factory() as db:
             sub = (
@@ -262,6 +264,17 @@ class DendriticCellAgent:
             )
             res = await db.execute(sub)
             agent_ids = [str(r[0]) for r in res.all()]
+
+        # Crash recovery: skip agents already processed in a previous (crashed) run
+        checkpoint = await load_checkpoint(self.redis, "dca_scan")
+        if checkpoint:
+            last_agent_id = checkpoint.get("last_processed_agent_id")
+            if last_agent_id and last_agent_id in agent_ids:
+                try:
+                    idx = agent_ids.index(last_agent_id)
+                    agent_ids = agent_ids[idx + 1:]
+                except ValueError:
+                    pass
 
         samples: list[DCASample] = []
         for aid in agent_ids:
@@ -318,6 +331,16 @@ class DendriticCellAgent:
                     )
                 except Exception:
                     pass
+
+            # Checkpoint after each agent so a crash can resume from here
+            try:
+                await save_checkpoint(self.redis, "dca_scan", {
+                    "last_processed_agent_id": aid,
+                })
+            except Exception:
+                pass
+
+        await clear_checkpoint(self.redis, "dca_scan")
 
         try:
             payload = json.dumps(

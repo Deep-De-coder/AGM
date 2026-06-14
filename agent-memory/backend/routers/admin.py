@@ -262,6 +262,41 @@ async def verify_integrity_and_recover(
     }
 
 
+@router.get("/idempotency-stats", status_code=status.HTTP_200_OK)
+async def idempotency_stats() -> dict[str, Any]:
+    """Count active idempotency keys currently held in Redis."""
+    redis = await get_redis()
+    count = 0
+    async for _ in redis.scan_iter(match="idempotency:*"):
+        count += 1
+    return {"active_idempotency_keys": count}
+
+
+@router.get("/task-checkpoints", status_code=status.HTTP_200_OK)
+async def task_checkpoints() -> dict[str, Any]:
+    """Return crash-recovery checkpoint state for background tasks."""
+    from backend.lib.checkpoint import load_checkpoint
+
+    redis = await get_redis()
+    trust_cp = await load_checkpoint(redis, "trust_decay")
+    dca_cp = await load_checkpoint(redis, "dca_scan")
+    return {
+        "trust_decay": trust_cp,
+        "dca_scan": dca_cp,
+    }
+
+
+@router.post("/clear-checkpoints", status_code=status.HTTP_200_OK)
+async def clear_checkpoints() -> dict[str, Any]:
+    """Delete crash-recovery checkpoints for all background tasks."""
+    from backend.lib.checkpoint import clear_checkpoint
+
+    redis = await get_redis()
+    await clear_checkpoint(redis, "trust_decay")
+    await clear_checkpoint(redis, "dca_scan")
+    return {"status": "ok", "cleared": ["trust_decay", "dca_scan"]}
+
+
 # ── Attack simulation ────────────────────────────────────────────────────────
 
 _ATTACK_MAP: dict[

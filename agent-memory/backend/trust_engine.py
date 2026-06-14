@@ -546,13 +546,52 @@ async def run_trust_pass(
     session: AsyncSession, *, manual: bool = False
 ) -> dict[str, Any]:
     """One full recalculation for all non-deleted memories."""
+    from backend.lib.checkpoint import clear_checkpoint, load_checkpoint, save_checkpoint
+
     redis = await get_redis()
-    result = await session.execute(
+
+    # Crash recovery: resume from last checkpointed memory ID
+    checkpoint = await load_checkpoint(redis, "trust_decay")
+    last_processed_id: uuid.UUID | None = None
+    if checkpoint:
+        lp = checkpoint.get("last_processed_id")
+        if lp:
+            try:
+                last_processed_id = uuid.UUID(lp)
+            except (ValueError, AttributeError):
+                pass
+
+    query = (
         select(Memory)
         .options(selectinload(Memory.provenance_events))
         .where(Memory.is_deleted.is_(False))
+        .order_by(Memory.id.asc())
     )
+    if last_processed_id is not None:
+        query = query.where(Memory.id > last_processed_id)
+
+    result = await session.execute(query)
     memories: list[Memory] = list(result.scalars().unique().all())
+
+    # Double-decay guard (B5): skip memories that already received a "decay" snapshot
+    # within the last 120 seconds (protects against crash-resume re-processing).
+    now_utc = datetime.now(timezone.utc)
+    snap_result = await session.execute(
+        select(
+            TrustMetricSnapshot.memory_id,
+            TrustMetricSnapshot.snapshot_reason,
+            TrustMetricSnapshot.created_at,
+        ).where(TrustMetricSnapshot.snapshot_reason.contains("decay"))
+    )
+    recently_decayed_ids: set[uuid.UUID] = set()
+    for snap_row in snap_result.all():
+        ca = snap_row.created_at
+        if ca is None:
+            continue
+        if ca.tzinfo is None:
+            ca = ca.replace(tzinfo=timezone.utc)
+        if (now_utc - ca).total_seconds() <= 120:
+            recently_decayed_ids.add(snap_row.memory_id)
 
     outcome_map = await _load_session_outcomes(session, redis, memories)
 
@@ -565,8 +604,12 @@ async def run_trust_pass(
     updated = 0
     flagged_new = 0
     quorum_cache: dict[tuple[str, str | None], Any] = {}
+    processed_in_run = 0
 
     for mem in memories:
+        # Double-decay guard: skip if recently processed
+        if mem.id in recently_decayed_ids:
+            continue
         evs = sorted(mem.provenance_events, key=lambda e: e.timestamp)
         event_times = [e.timestamp for e in evs]
         if event_times and event_times[0].tzinfo is None:
@@ -762,10 +805,19 @@ async def run_trust_pass(
             )
         )
 
+        processed_in_run += 1
+        if processed_in_run % 50 == 0:
+            await session.commit()
+            await save_checkpoint(redis, "trust_decay", {
+                "last_processed_id": str(mem.id),
+                "processed_count": processed_in_run,
+            })
+
     total = len(memories)
     flagged_total = sum(1 for m in memories if m.is_flagged)
     avg_trust = sum(m.trust_score for m in memories) / total if total else 0.0
     await session.commit()
+    await clear_checkpoint(redis, "trust_decay")
 
     return {
         "memories_processed": total,

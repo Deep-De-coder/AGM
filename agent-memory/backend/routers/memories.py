@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse
 from sqlalchemy import exists, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,6 +19,11 @@ from backend.dendritic_cell import DendriticCellAgent
 from backend.lib.baseline import update_behavioral_baseline
 from backend.lib.behavioral_hash import update_agent_behavioral_hash
 from backend.lib.content_address import compute_content_hash, verify_memory_integrity
+from backend.lib.idempotency import (
+    check_idempotency,
+    compute_content_idempotency_key,
+    store_idempotency,
+)
 from backend.lib.quorum_trust import compute_quorum_score, quorum_to_dict
 from backend.lib.reconsolidation import ReconsolidationGuard, reconsolidation_status
 from backend.lib.taint_propagation import compute_final_taint
@@ -88,10 +93,64 @@ async def _run_rule_checks_after_write(memory_id: str) -> None:
     "", response_model=MemoryCreateResponse, status_code=status.HTTP_201_CREATED
 )
 async def create_memory(
+    request: Request,
     background_tasks: BackgroundTasks,
     body: MemoryCreate,
     db: AsyncSession = Depends(get_db),
 ) -> MemoryCreateResponse:
+    redis = await get_redis()
+
+    # Idempotency check: use explicit header or derive from content
+    idempotency_key = request.headers.get("X-Idempotency-Key")
+    if not idempotency_key:
+        idempotency_key = compute_content_idempotency_key(
+            str(body.agent_id),
+            body.content,
+            str(body.session_id) if body.session_id else None,
+            body.source_type,
+            body.source_identifier,
+            body.safety_context,
+        )
+
+    existing = await check_idempotency(redis, idempotency_key)
+    if existing:
+        orig_memory_id = existing.get("memory_id")
+        if orig_memory_id:
+            try:
+                await log_memory_event(
+                    db,
+                    memory_id=uuid.UUID(str(orig_memory_id)),
+                    event_type="idempotency_cache_hit",
+                    performed_by_agent_id=body.agent_id,
+                    event_metadata={"idempotency_key": idempotency_key},
+                )
+                await db.commit()
+            except Exception:
+                pass
+        try:
+            await push_notification(
+                NotificationEvent(
+                    id=str(uuid.uuid4()),
+                    type="rule_violation",
+                    severity="LOW",
+                    title="Duplicate write blocked",
+                    message=f"Idempotent replay for key {idempotency_key[:16]}...",
+                    memory_id=str(orig_memory_id) if orig_memory_id else "",
+                    agent_id=str(body.agent_id),
+                    rule_name="IDEMPOTENCY",
+                    timestamp=datetime.now(timezone.utc),
+                    read=False,
+                ),
+                redis,
+            )
+        except Exception:
+            pass
+        return JSONResponse(
+            content=existing,
+            status_code=200,
+            headers={"X-Idempotent-Replay": "true"},
+        )
+
     agent_result = await db.execute(select(Agent).where(Agent.id == body.agent_id))
     if agent_result.scalar_one_or_none() is None:
         raise HTTPException(
@@ -124,7 +183,6 @@ async def create_memory(
     )
     memory.content_hash_valid = True
 
-    redis = await get_redis()
     parents = await compute_causal_parents(body.agent_id, body.session_id, db)
     clock = await increment_clock(str(body.agent_id), redis)
     depth = await compute_causal_depth(parents, db)
@@ -281,18 +339,20 @@ async def create_memory(
     await db.commit()
     await db.refresh(memory)
     background_tasks.add_task(_run_rule_checks_after_write, str(memory.id))
-    return MemoryCreateResponse(
-        memory_id=memory.id,
-        trust_score=memory.trust_score,
-        created_at=memory.created_at,
-        dca_warning=dca_warning,
-        behavioral_hash=b_hash,
-        behavioral_drift=drift,
-        content_hash=memory.content_hash[:16] if memory.content_hash else None,
-        quorum=quorum_to_dict(quorum),
-        quorum_warning=quorum_warning,
-        rules_check="pending",
-    )
+    response_data: dict[str, Any] = {
+        "memory_id": str(memory.id),
+        "trust_score": memory.trust_score,
+        "created_at": memory.created_at.isoformat() if memory.created_at else None,
+        "dca_warning": dca_warning,
+        "behavioral_hash": b_hash,
+        "behavioral_drift": drift,
+        "content_hash": memory.content_hash[:16] if memory.content_hash else None,
+        "quorum": quorum_to_dict(quorum),
+        "quorum_warning": quorum_warning,
+        "rules_check": "pending",
+    }
+    await store_idempotency(redis, idempotency_key, response_data)
+    return JSONResponse(content=response_data, status_code=201)
 
 
 @router.get("", response_model=MemoryListResponse)

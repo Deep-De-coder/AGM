@@ -31,6 +31,7 @@ def register_tools(mcp: FastMCP, client: AgentMemoryClient) -> None:
         safety_context: dict[str, Any] | None = None,
         session_id: str | None = None,
         taint_override: float | None = None,
+        idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         """
         Write a new memory with full provenance tracking.
@@ -81,6 +82,7 @@ def register_tools(mcp: FastMCP, client: AgentMemoryClient) -> None:
                 source_identifier=source_identifier,
                 safety_context=ctx,
                 session_id=session_id,
+                idempotency_key=idempotency_key,
             )
         except AgentMemoryClientError as e:
             raise _tool_error(e) from e
