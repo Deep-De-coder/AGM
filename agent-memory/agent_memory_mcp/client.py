@@ -363,8 +363,14 @@ class AgentMemoryClient:
                     "severity": "CRITICAL",
                     "description": "Agent queries specifically for anergic memories. Legitimate agents use get_safe_memories.",
                 },
+                {
+                    "id": "RULE_014",
+                    "name": "high_taint_write",
+                    "severity": "HIGH",
+                    "description": "Memory written with taint score above 0.8 — high contamination risk from causal chain.",
+                },
             ],
-            "total": 13,
+            "total": 14,
             "source": "embedded",
         }
 

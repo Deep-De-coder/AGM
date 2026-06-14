@@ -91,6 +91,8 @@ class MemoryDetail(BaseModel):
     trust_recomputed: bool | None = None
     live_quorum: dict[str, Any] | None = None
     quorum_warning: str | None = None
+    taint_score: float | None = None
+    taint_sources: dict[str, Any] | None = None
 
 
 class MemoryListItem(BaseModel):

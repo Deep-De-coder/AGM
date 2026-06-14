@@ -20,6 +20,7 @@ class RuleViolation:
     description: str
     detected_at: datetime
     auto_flagged: bool
+    metadata: dict | None = None
 
 
 @dataclass
@@ -440,6 +441,28 @@ def _check_trust_score_cliff(ctx: RuleContext) -> RuleViolation | None:
     return None
 
 
+# --- RULE_014 high_taint_write -------------------------------------------
+
+
+def _check_high_taint_write(ctx: RuleContext) -> RuleViolation | None:
+    taint = float(getattr(ctx.memory, "taint_score", 0.0))
+    if taint <= 0.8:
+        return None
+    sources = getattr(ctx.memory, "taint_sources", None) or {}
+    v = _violation(
+        ctx,
+        "RULE_014",
+        "HIGH",
+        (
+            f"Memory written with taint score {taint:.2f} (> 0.8) — "
+            "high contamination risk from causal chain."
+        ),
+        auto_flagged=True,
+    )
+    v.metadata = {"taint_score": taint, "taint_sources": sources}
+    return v
+
+
 @dataclass
 class Rule:
     name: str
@@ -526,5 +549,11 @@ PREDEFINED_RULES: list[Rule] = [
         description="Direct query for anergic memories (checked at query time).",
         severity="CRITICAL",
         check=_check_anergy_bypass_attempt,
+    ),
+    Rule(
+        name="RULE_014",
+        description="Memory written with taint score above 0.8 — high contamination risk from causal chain.",
+        severity="HIGH",
+        check=_check_high_taint_write,
     ),
 ]

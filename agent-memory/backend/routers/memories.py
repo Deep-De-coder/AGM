@@ -21,6 +21,7 @@ from backend.lib.behavioral_hash import update_agent_behavioral_hash
 from backend.lib.content_address import compute_content_hash, verify_memory_integrity
 from backend.lib.quorum_trust import compute_quorum_score, quorum_to_dict
 from backend.lib.reconsolidation import ReconsolidationGuard, reconsolidation_status
+from backend.lib.taint_propagation import compute_final_taint
 from backend.lib.vector_clock import (
     compute_causal_depth,
     compute_causal_parents,
@@ -139,6 +140,23 @@ async def create_memory(
             performed_by_agent_id=body.agent_id,
             event_metadata={"causal_validation": reason},
         )
+
+    taint_score, taint_sources = await compute_final_taint(
+        body.source_type,
+        body.content,
+        body.safety_context,
+        parents,
+        db,
+    )
+    memory.taint_score = taint_score
+    memory.taint_sources = taint_sources
+    await log_memory_event(
+        db,
+        memory_id=memory.id,
+        event_type="taint_computed",
+        performed_by_agent_id=body.agent_id,
+        event_metadata={"taint_score": taint_score, "taint_sources": taint_sources},
+    )
 
     await log_memory_event(
         db,
@@ -411,6 +429,7 @@ async def list_safe_memories(
         Memory.trust_score >= min_trust_score,
         Memory.memory_state.not_in(("anergic", "quarantined")),
         Memory.is_flagged.is_(False),
+        Memory.taint_score <= 0.9,
         ~unresolved,
     ]
     if agent_id is not None:
@@ -712,6 +731,8 @@ async def get_memory(
         trust_recomputed=trust_recomputed,
         live_quorum=live_quorum,
         quorum_warning=quorum_warning,
+        taint_score=float(getattr(memory, "taint_score", 0.0)),
+        taint_sources=getattr(memory, "taint_sources", None),
     )
 
 

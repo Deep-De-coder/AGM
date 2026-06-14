@@ -53,6 +53,7 @@ class DendriticCellAgent:
             "source_collapse": 0.15,
             "trust_cliff_cluster": 0.2,
             "retrieval_anomaly": 0.1,
+            "taint_accumulation": 0.15,
         }
 
     async def _db(self) -> AsyncSession:
@@ -165,6 +166,19 @@ class DendriticCellAgent:
             sr = sum(1 for _, owner_agent in rows if owner_agent == aid)
             retrieval_anomaly = (tr > 0) and (sr / tr) > 0.8
 
+            since1h = now - timedelta(hours=1)
+            taint_rows = await db.execute(
+                select(Memory.taint_score)
+                .where(
+                    Memory.agent_id == aid,
+                    Memory.is_deleted.is_(False),
+                    Memory.created_at >= since1h,
+                )
+            )
+            taint_scores = [float(r[0]) for r in taint_rows.all() if r[0] is not None]
+            mean_taint = sum(taint_scores) / len(taint_scores) if taint_scores else 0.0
+            taint_accumulation = mean_taint > 0.5
+
         dangers: list[str] = []
         safes: list[str] = []
         d_score = 0.0
@@ -184,6 +198,9 @@ class DendriticCellAgent:
         if retrieval_anomaly:
             dangers.append("retrieval_anomaly")
             d_score += self.danger_signal_weights["retrieval_anomaly"]
+        if taint_accumulation:
+            dangers.append("taint_accumulation")
+            d_score += self.danger_signal_weights["taint_accumulation"]
 
         if consistent:
             safes.append("consistent_reasoning")

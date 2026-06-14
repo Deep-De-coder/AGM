@@ -184,8 +184,10 @@ async def compute_trust_score(memory: Memory, db: AsyncSession, redis: Any) -> f
         anomaly_penalty=anomaly_penalty,
         session_outcome=session_outcome,
     )
+    taint_score = float(getattr(memory, "taint_score", 0.0))
+    taint_penalty = max(0.3, 1.0 - taint_score)
     q = await compute_quorum_score(str(memory.agent_id), memory.session_id, db, redis)
-    return _clamp01(trust * q.memory_trust_multiplier)
+    return _clamp01(trust * q.memory_trust_multiplier * taint_penalty)
 
 
 def _build_trust_breakdown(
@@ -197,6 +199,7 @@ def _build_trust_breakdown(
     utility_multiplier: float,
     reality_score_factor: float,
     quorum_multiplier: float,
+    taint_penalty: float,
     triggered_rules: list[str],
 ) -> dict[str, Any]:
     return {
@@ -207,11 +210,12 @@ def _build_trust_breakdown(
         "utility_multiplier": utility_multiplier,
         "reality_score_factor": reality_score_factor,
         "quorum_multiplier": quorum_multiplier,
+        "taint_penalty": taint_penalty,
         "triggered_rules": triggered_rules,
         "formula": (
             "base_score * time_decay_factor * source_reliability_factor * "
             "anomaly_penalty * utility_multiplier * reality_score_factor * "
-            "quorum_multiplier"
+            "quorum_multiplier * taint_penalty"
         ),
     }
 
@@ -672,6 +676,10 @@ async def run_trust_pass(
             session_outcome=soc,
         )
 
+        taint_score = float(getattr(mem, "taint_score", 0.0))
+        taint_penalty = max(0.3, 1.0 - taint_score)
+        new_trust = _clamp01(new_trust * taint_penalty)
+
         qkey = (str(mem.agent_id), str(mem.session_id) if mem.session_id else None)
         if qkey not in quorum_cache:
             quorum_cache[qkey] = await compute_quorum_score(
@@ -708,6 +716,7 @@ async def run_trust_pass(
             utility_multiplier=utility_mult,
             reality_score_factor=reality_mult,
             quorum_multiplier=q.memory_trust_multiplier,
+            taint_penalty=taint_penalty,
             triggered_rules=rule_names,
         )
 

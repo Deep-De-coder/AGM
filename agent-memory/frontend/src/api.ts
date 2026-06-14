@@ -100,6 +100,8 @@ export type MemoryDetail = MemoryListItem & {
   causal?: Record<string, unknown> | null;
   content_hash?: string | null;
   content_hash_valid?: boolean | null;
+  taint_score?: number | null;
+  taint_sources?: Record<string, number> | null;
 };
 
 export type AgentRegistryRow = {

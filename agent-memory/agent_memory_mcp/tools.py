@@ -30,6 +30,7 @@ def register_tools(mcp: FastMCP, client: AgentMemoryClient) -> None:
         source_identifier: str,
         safety_context: dict[str, Any] | None = None,
         session_id: str | None = None,
+        taint_override: float | None = None,
     ) -> dict[str, Any]:
         """
         Write a new memory with full provenance tracking.
@@ -56,6 +57,10 @@ def register_tools(mcp: FastMCP, client: AgentMemoryClient) -> None:
               (1.0=direct observation, 0.3=external claim)
             cognitive_operations: list of processing steps applied
             context_hash: SHA256 hash of current session state
+          taint_override: Optional float 0.0-1.0. Supply when you know
+            the content originates from an untrusted source and want to
+            set the taint score explicitly rather than letting the system
+            infer it from source_type alone.
 
         Returns:
           Dict with memory_id, initial trust_score, memory_state,
@@ -65,13 +70,16 @@ def register_tools(mcp: FastMCP, client: AgentMemoryClient) -> None:
         Use instead of: nothing — this is the primary write tool.
         Do NOT use for reading. Use get_safe_memories for reasoning.
         """
+        ctx: dict[str, Any] = dict(safety_context or {})
+        if taint_override is not None:
+            ctx["taint_override"] = float(max(0.0, min(1.0, taint_override)))
         try:
             return await client.write_memory(
                 content=content,
                 agent_id=agent_id,
                 source_type=source_type,
                 source_identifier=source_identifier,
-                safety_context=safety_context,
+                safety_context=ctx,
                 session_id=session_id,
             )
         except AgentMemoryClientError as e:

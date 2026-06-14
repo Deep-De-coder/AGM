@@ -6,6 +6,53 @@ import { api, type MemoryListItem } from "../api";
 import { Badge, Button, Card, cn } from "../components/ui";
 import { severityBadgeClass } from "../lib/severity";
 
+function taintColor(score: number): string {
+  if (score < 0.3) return "bg-emerald-500";
+  if (score < 0.6) return "bg-amber-400";
+  if (score < 0.8) return "bg-orange-500";
+  return "bg-red-600";
+}
+
+function taintPillClass(value: number): string {
+  if (value < 0.3) return "bg-emerald-500/20 text-emerald-300";
+  if (value < 0.6) return "bg-amber-500/20 text-amber-300";
+  if (value < 0.8) return "bg-orange-500/20 text-orange-300";
+  return "bg-red-500/20 text-red-300";
+}
+
+function TaintBar({ score, sources }: { score: number; sources: Record<string, number> | null | undefined }) {
+  if (score === 0) {
+    return <p className="text-xs text-emerald-400">Clean</p>;
+  }
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-2">
+        <div className="flex-1 h-2 bg-zinc-800 rounded-full overflow-hidden">
+          <div
+            className={cn("h-full rounded-full transition-all", taintColor(score))}
+            style={{ width: `${score * 100}%` }}
+          />
+        </div>
+        <span className="text-xs tabular-nums text-zinc-400 w-10 text-right">
+          {score.toFixed(2)}
+        </span>
+      </div>
+      {sources && Object.keys(sources).length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          {Object.entries(sources).map(([src, val]) => (
+            <span
+              key={src}
+              className={cn("px-2 py-0.5 rounded text-[10px] font-medium", taintPillClass(val))}
+            >
+              {src}: {val.toFixed(2)}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function preview(s: string, n = 50) {
   if (s.length <= n) return s;
   return s.slice(0, n) + "…";
@@ -296,6 +343,13 @@ export function MemoriesPage() {
               ) : (
                 <p className="text-zinc-500 text-sm mt-1">Hash not computed</p>
               )}
+            </Card>
+            <Card>
+              <p className="text-xs text-zinc-500 mb-2">Taint</p>
+              <TaintBar
+                score={detail.data.taint_score ?? 0}
+                sources={detail.data.taint_sources}
+              />
             </Card>
             <Card>
               <p className="text-xs text-zinc-500 mb-2">Reconsolidation</p>

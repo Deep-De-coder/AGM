@@ -136,6 +136,12 @@ class Memory(Base):
     causal_depth: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default="0"
     )
+    taint_score: Mapped[float] = mapped_column(
+        Float, nullable=False, default=0.0, server_default="0.0"
+    )
+    taint_sources: Mapped[dict[str, Any] | None] = mapped_column(
+        JSONB, nullable=True
+    )
 
     agent: Mapped["Agent"] = relationship(back_populates="memories")
     provenance_events: Mapped[list["MemoryProvenanceLog"]] = relationship(

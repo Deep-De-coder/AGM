@@ -167,6 +167,14 @@ async def check_memory_rules(
         if dup.scalar_one_or_none() is not None:
             continue
 
+        rule_meta: dict = {
+            "rule_description": next(
+                (r.description for r in PREDEFINED_RULES if r.name == v.rule_name),
+                "",
+            ),
+        }
+        if v.metadata:
+            rule_meta.update(v.metadata)
         row = RuleViolationORM(
             id=uuid.uuid4(),
             memory_id=mid,
@@ -179,12 +187,7 @@ async def check_memory_rules(
             acknowledged_at=None,
             detected_at=v.detected_at,
             auto_flagged=v.auto_flagged,
-            metadata_={
-                "rule_description": next(
-                    (r.description for r in PREDEFINED_RULES if r.name == v.rule_name),
-                    "",
-                ),
-            },  # rule_name matches Rule.name (slug)
+            metadata_=rule_meta,
         )
         db.add(row)
         cache_mid = v.memory_id or memory_id
