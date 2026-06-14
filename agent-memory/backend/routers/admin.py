@@ -22,7 +22,7 @@ from backend.demo_simulation import (
     attack_7_consolidation_hijack,
 )
 
-from backend.database import AsyncSessionLocal, get_db
+from backend.database import AsyncSessionLocal, get_db, log_memory_event
 from backend.dendritic_cell import DendriticCellAgent
 from backend.lib.content_address import verify_memory_integrity
 from backend.models import (
@@ -67,6 +67,7 @@ class SessionSeedBody(BaseModel):
     context_hash: str = Field(..., min_length=1, max_length=256)
     agent_id: uuid.UUID | None = None
     outcome: str | None = Field(default=None, max_length=32)
+    context_type: str = Field(default="unknown", max_length=32)
 
 
 @router.post("/sessions", status_code=status.HTTP_201_CREATED)
@@ -79,6 +80,7 @@ async def seed_session(
         context_hash=body.context_hash,
         agent_id=body.agent_id,
         outcome=body.outcome,
+        context_type=body.context_type,
     )
     db.add(row)
     await db.commit()
@@ -166,7 +168,101 @@ async def verify_integrity(
     }
 
 
-# ── Attack simulation ────────────────────────────���────────────────────────────
+@router.post("/verify-integrity-and-recover", status_code=status.HTTP_200_OK)
+async def verify_integrity_and_recover(
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, object]:
+    """Scan all memories for hash mismatches, auto-quarantine tampered ones, and attempt recovery."""
+    redis = await get_redis()
+    res = await db.execute(
+        select(Memory).where(
+            Memory.content_hash.isnot(None),
+            Memory.is_deleted.is_(False),
+        )
+    )
+    rows = list(res.scalars().all())
+    total_scanned = 0
+    passed = 0
+    failed = 0
+    auto_quarantined = 0
+    recovered = 0
+    unrecoverable = 0
+
+    for m in rows:
+        total_scanned += 1
+        r = await verify_memory_integrity(m, db, redis)
+        if r.get("valid"):
+            passed += 1
+            continue
+
+        failed += 1
+        m.memory_state = "quarantined"
+        await log_memory_event(
+            db,
+            memory_id=m.id,
+            event_type="auto_quarantine_corruption",
+            performed_by_agent_id=None,
+            event_metadata={
+                "stored_hash": r.get("stored_hash"),
+                "computed_hash": r.get("computed_hash"),
+                "batch_scan": True,
+            },
+        )
+        auto_quarantined += 1
+
+        prov_res = await db.execute(
+            select(MemoryProvenanceLog)
+            .where(
+                MemoryProvenanceLog.memory_id == m.id,
+                MemoryProvenanceLog.event_type == "memory_created",
+            )
+            .order_by(MemoryProvenanceLog.timestamp.asc())
+            .limit(1)
+        )
+        creation_event = prov_res.scalar_one_or_none()
+        if creation_event:
+            meta = creation_event.event_metadata or {}
+            original_content = meta.get("content")
+            if original_content:
+                recovered_mem = Memory(
+                    content=original_content,
+                    agent_id=m.agent_id,
+                    source_type=meta.get("source_type", m.source_type),
+                    source_identifier=meta.get("source_identifier", m.source_identifier),
+                    safety_context=meta.get("safety_context") or {},
+                    session_id=m.session_id,
+                    memory_state="anergic",
+                    taint_score=float(getattr(m, "taint_score", 0.0)),
+                    taint_sources=getattr(m, "taint_sources", None),
+                )
+                db.add(recovered_mem)
+                await db.flush()
+                await log_memory_event(
+                    db,
+                    memory_id=recovered_mem.id,
+                    event_type="recovered_from_corruption",
+                    performed_by_agent_id=None,
+                    event_metadata={"original_memory_id": str(m.id)},
+                )
+                recovered += 1
+            else:
+                unrecoverable += 1
+        else:
+            unrecoverable += 1
+
+    await db.commit()
+    return {
+        "total_scanned": total_scanned,
+        "passed": passed,
+        "failed": failed,
+        "auto_quarantined": auto_quarantined,
+        "recovered": recovered,
+        "unrecoverable": unrecoverable,
+        "scan_completed_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+# ── Attack simulation ────────────────────────────────────────────────────────
 
 _ATTACK_MAP: dict[
     str,

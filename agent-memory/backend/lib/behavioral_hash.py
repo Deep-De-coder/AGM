@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.database import log_memory_event
 from backend.lib.baseline import DEFAULT_BEHAVIORAL_BASELINE
-from backend.models import Agent, Memory
+from backend.models import Agent, Memory, Session as SessionRow
 from backend.notifications import NotificationEvent, push_notification
 from backend.redis_client import get_redis
 
@@ -162,6 +162,81 @@ async def _fill_agent_level_stats(
         vec["avg_safety_context_keys"] = 0.0
 
 
+_SCALAR_CONTEXT_FIELDS = [
+    "avg_content_length",
+    "avg_content_length_std",
+    "avg_trust_score_written",
+    "write_interval_avg",
+    "write_interval_std",
+    "session_count",
+    "flag_rate",
+    "inter_agent_fraction",
+    "avg_safety_context_keys",
+]
+
+
+def _vec_to_floats(vec: dict[str, Any]) -> list[float]:
+    return [float(vec.get(k, 0.0)) for k in _SCALAR_CONTEXT_FIELDS]
+
+
+def _cos_sim_vectors(a: list[float], b: list[float]) -> float:
+    if not a or not b or len(a) != len(b):
+        return 0.0
+    dot = sum(x * y for x, y in zip(a, b, strict=True))
+    na = math.sqrt(sum(x * x for x in a))
+    nb = math.sqrt(sum(y * y for y in b))
+    if na == 0.0 or nb == 0.0:
+        return 0.0
+    return dot / (na * nb)
+
+
+def compute_context_drift(
+    production_vector: dict[str, Any],
+    evaluation_vector: dict[str, Any],
+) -> float:
+    """Cosine distance between production and evaluation behavioral vectors.
+
+    Returns 0.0 (no drift) to 1.0 (maximally different). Drift > 0.5 suggests sandbagging.
+    """
+    if not production_vector or not evaluation_vector:
+        return 0.0
+    p = _vec_to_floats(production_vector)
+    e = _vec_to_floats(evaluation_vector)
+    sim = _cos_sim_vectors(p, e)
+    return max(0.0, min(1.0, 1.0 - sim))
+
+
+async def compute_context_behavioral_vector(
+    agent_id: uuid.UUID,
+    context_type: str,
+    db: AsyncSession,
+    redis: Any | None = None,
+) -> dict[str, Any]:
+    """Compute behavioral vector from memories written in sessions of the given context_type."""
+    sess_res = await db.execute(
+        select(SessionRow.id).where(SessionRow.context_type == context_type)
+    )
+    session_ids = [r[0] for r in sess_res.all()]
+    if not session_ids:
+        return {}
+    mem_res = await db.execute(
+        select(Memory)
+        .where(
+            Memory.agent_id == agent_id,
+            Memory.is_deleted.is_(False),
+            Memory.session_id.in_(session_ids),
+        )
+        .order_by(Memory.created_at.desc())
+        .limit(20)
+    )
+    mems = list(mem_res.scalars().all())
+    if not mems:
+        return {}
+    vec = compute_behavioral_vector(agent_id, mems)
+    await _fill_agent_level_stats(db, agent_id, vec)
+    return vec
+
+
 def hash_behavioral_vector(vector: dict[str, Any]) -> str:
     st = vector.get("source_type_dist") or {}
     payload = {
@@ -261,7 +336,8 @@ async def update_agent_behavioral_hash(
     agent_id: uuid.UUID,
     new_memory: Memory,
     db: AsyncSession,
-) -> tuple[str, float]:
+    session_context_type: str | None = None,
+) -> tuple[str, float, dict[str, Any] | None]:
     res = await db.execute(
         select(Memory)
         .where(Memory.agent_id == agent_id, Memory.is_deleted.is_(False))
@@ -356,4 +432,36 @@ async def update_agent_behavioral_hash(
             },
         )
 
-    return new_hash, drift
+    eval_vec_result: dict[str, Any] | None = None
+    if session_context_type == "evaluation":
+        eval_vec = await compute_context_behavioral_vector(agent_id, "evaluation", db)
+        if eval_vec:
+            eval_vec_result = eval_vec
+            prod_vec = await compute_context_behavioral_vector(agent_id, "production", db)
+            if prod_vec:
+                ctx_drift = compute_context_drift(prod_vec, eval_vec)
+                if ctx_drift > 0.5:
+                    try:
+                        r = await get_redis()
+                        await push_notification(
+                            NotificationEvent(
+                                id=str(uuid.uuid4()),
+                                type="rule_violation",
+                                severity="HIGH",
+                                title="Sandbagging detected",
+                                message=(
+                                    f"SANDBAGGING: Agent {agent.name} behavioral drift "
+                                    f"between evaluation and production: {ctx_drift:.3f}."
+                                ),
+                                memory_id=str(new_memory.id),
+                                agent_id=str(agent_id),
+                                rule_name="RULE_015",
+                                timestamp=now,
+                                read=False,
+                            ),
+                            r,
+                        )
+                    except Exception:
+                        pass
+
+    return new_hash, drift, eval_vec_result

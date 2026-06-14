@@ -54,6 +54,7 @@ class DendriticCellAgent:
             "trust_cliff_cluster": 0.2,
             "retrieval_anomaly": 0.1,
             "taint_accumulation": 0.15,
+            "storage_corruption_cluster": 0.15,
         }
 
     async def _db(self) -> AsyncSession:
@@ -179,6 +180,18 @@ class DendriticCellAgent:
             mean_taint = sum(taint_scores) / len(taint_scores) if taint_scores else 0.0
             taint_accumulation = mean_taint > 0.5
 
+            corruption_q = await db.execute(
+                select(func.count())
+                .select_from(MemoryProvenanceLog)
+                .join(Memory, Memory.id == MemoryProvenanceLog.memory_id)
+                .where(
+                    Memory.agent_id == aid,
+                    MemoryProvenanceLog.event_type == "auto_quarantine_corruption",
+                    MemoryProvenanceLog.timestamp >= since1h,
+                )
+            )
+            storage_corruption_cluster = int(corruption_q.scalar_one() or 0) >= 2
+
         dangers: list[str] = []
         safes: list[str] = []
         d_score = 0.0
@@ -201,6 +214,9 @@ class DendriticCellAgent:
         if taint_accumulation:
             dangers.append("taint_accumulation")
             d_score += self.danger_signal_weights["taint_accumulation"]
+        if storage_corruption_cluster:
+            dangers.append("storage_corruption_cluster")
+            d_score += self.danger_signal_weights["storage_corruption_cluster"]
 
         if consistent:
             safes.append("consistent_reasoning")

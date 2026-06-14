@@ -44,6 +44,7 @@ class Agent(Base):
         DateTime(timezone=True), nullable=True
     )
     behavioral_vector: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    evaluation_behavioral_vector: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
 
     memories: Mapped[list["Memory"]] = relationship(back_populates="agent")
     sessions: Mapped[list["Session"]] = relationship(back_populates="agent")
@@ -62,6 +63,7 @@ class Session(Base):
         UUID(as_uuid=True), ForeignKey("agents.id", ondelete="SET NULL"), nullable=True
     )
     outcome: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    context_type: Mapped[str] = mapped_column(String(32), nullable=False, default="unknown", server_default="unknown")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=utcnow,

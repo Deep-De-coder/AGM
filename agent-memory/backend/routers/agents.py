@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.database import get_db
 from backend.lib.baseline import DEFAULT_BEHAVIORAL_BASELINE
+from backend.lib.behavioral_hash import compute_context_drift
 from backend.lib.quorum_trust import compute_quorum_score, quorum_to_dict
 from backend.models import Agent, Memory
 from backend.redis_client import get_redis
@@ -148,6 +149,31 @@ async def get_behavioral_hash(
         "behavioral_vector": agent.behavioral_vector or {},
         "baseline_vector": baseline_vector,
         "hash_age_seconds": age,
+    }
+
+
+@router.get("/{agent_id}/context-drift")
+async def get_context_drift(
+    agent_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, object]:
+    result = await db.execute(select(Agent).where(Agent.id == agent_id))
+    agent = result.scalar_one_or_none()
+    if agent is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found"
+        )
+    prod_vec: dict = agent.behavioral_vector or {}
+    eval_vec: dict = getattr(agent, "evaluation_behavioral_vector", None) or {}
+    ctx_drift: float | None = None
+    if prod_vec and eval_vec:
+        ctx_drift = compute_context_drift(prod_vec, eval_vec)
+    return {
+        "agent_id": str(agent_id),
+        "production_vector": prod_vec,
+        "evaluation_vector": eval_vec,
+        "context_drift": ctx_drift,
+        "sandbagging_risk": ctx_drift is not None and ctx_drift > 0.5,
     }
 
 

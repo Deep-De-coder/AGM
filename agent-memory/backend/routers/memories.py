@@ -32,6 +32,7 @@ from backend.models import (
     Agent,
     Memory,
     MemoryProvenanceLog,
+    Session as SessionRow,
 )
 from backend.models import (
     RuleViolation as RuleViolationORM,
@@ -170,6 +171,21 @@ async def create_memory(
         },
     )
 
+    await log_memory_event(
+        db,
+        memory_id=memory.id,
+        event_type="memory_created",
+        performed_by_agent_id=body.agent_id,
+        event_metadata={
+            "content": memory.content,
+            "source_type": memory.source_type,
+            "source_identifier": memory.source_identifier,
+            "agent_id": str(memory.agent_id),
+            "session_id": str(memory.session_id) if memory.session_id else None,
+            "safety_context": memory.safety_context or {},
+        },
+    )
+
     await redis.set(
         trust_cache_key(str(memory.id)),
         str(memory.trust_score),
@@ -185,7 +201,17 @@ async def create_memory(
     await db.commit()
     await db.refresh(memory)
     await update_behavioral_baseline(db, body.agent_id, memory)
-    b_hash, drift = await update_agent_behavioral_hash(body.agent_id, memory, db)
+
+    session_context_type: str | None = None
+    if body.session_id is not None:
+        sess_res = await db.execute(
+            select(SessionRow.context_type).where(SessionRow.id == body.session_id)
+        )
+        session_context_type = sess_res.scalar_one_or_none()
+
+    b_hash, drift, eval_vec_for_write = await update_agent_behavioral_hash(
+        body.agent_id, memory, db, session_context_type=session_context_type
+    )
 
     quorum = await compute_quorum_score(
         str(body.agent_id), body.session_id, db, redis
@@ -243,6 +269,14 @@ async def create_memory(
         dca_warning = (
             "Agent context is MATURE_DANGER — memory stored but flagged for review"
         )
+
+    # Write evaluation_behavioral_vector here (after DCA) so the DCA's StaticPool
+    # connection rollback does not undo this update before the commit below.
+    if eval_vec_for_write is not None:
+        ag_for_eval = (
+            await db.execute(select(Agent).where(Agent.id == body.agent_id))
+        ).scalar_one()
+        ag_for_eval.evaluation_behavioral_vector = eval_vec_for_write
 
     await db.commit()
     await db.refresh(memory)
@@ -624,6 +658,57 @@ async def get_memory(
     integ = await verify_memory_integrity(memory, db, redis)
     await db.commit()
     await db.refresh(memory)
+
+    if not integ.get("valid", True) and memory.content_hash:
+        # B1: auto-quarantine on hash mismatch
+        memory.memory_state = "quarantined"
+        await log_memory_event(
+            db,
+            memory_id=memory.id,
+            event_type="auto_quarantine_corruption",
+            performed_by_agent_id=None,
+            event_metadata={
+                "stored_hash": integ.get("stored_hash"),
+                "computed_hash": integ.get("computed_hash"),
+            },
+        )
+        # B2: attempt recovery from memory_created provenance event
+        prov_res = await db.execute(
+            select(MemoryProvenanceLog)
+            .where(
+                MemoryProvenanceLog.memory_id == memory.id,
+                MemoryProvenanceLog.event_type == "memory_created",
+            )
+            .order_by(MemoryProvenanceLog.timestamp.asc())
+            .limit(1)
+        )
+        creation_event = prov_res.scalar_one_or_none()
+        if creation_event:
+            meta = creation_event.event_metadata or {}
+            original_content = meta.get("content")
+            if original_content:
+                recovered_memory = Memory(
+                    content=original_content,
+                    agent_id=memory.agent_id,
+                    source_type=meta.get("source_type", memory.source_type),
+                    source_identifier=meta.get("source_identifier", memory.source_identifier),
+                    safety_context=meta.get("safety_context") or {},
+                    session_id=memory.session_id,
+                    memory_state="anergic",
+                    taint_score=float(getattr(memory, "taint_score", 0.0)),
+                    taint_sources=getattr(memory, "taint_sources", None),
+                )
+                db.add(recovered_memory)
+                await db.flush()
+                await log_memory_event(
+                    db,
+                    memory_id=recovered_memory.id,
+                    event_type="recovered_from_corruption",
+                    performed_by_agent_id=None,
+                    event_metadata={"original_memory_id": str(memory.id)},
+                )
+        await db.commit()
+        await db.refresh(memory)
 
     now = datetime.now(timezone.utc)
     created = memory.created_at

@@ -369,8 +369,14 @@ class AgentMemoryClient:
                     "severity": "HIGH",
                     "description": "Memory written with taint score above 0.8 — high contamination risk from causal chain.",
                 },
+                {
+                    "id": "RULE_015",
+                    "name": "sandbagging_detected",
+                    "severity": "HIGH",
+                    "description": "Agent behavioral drift between evaluation and production contexts > 0.5 — possible capability suppression.",
+                },
             ],
-            "total": 14,
+            "total": 15,
             "source": "embedded",
         }
 

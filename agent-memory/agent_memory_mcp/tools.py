@@ -405,7 +405,7 @@ def register_tools(mcp: FastMCP, client: AgentMemoryClient) -> None:
     )
     async def run_rules_check(memory_id: str) -> dict[str, Any]:
         """
-        Manually trigger the 13-rule check on a specific memory.
+        Manually trigger the 15-rule check on a specific memory.
 
         Rules normally run in background after writes. This tool
         forces immediate re-evaluation when context has changed.
@@ -457,13 +457,13 @@ def register_tools(mcp: FastMCP, client: AgentMemoryClient) -> None:
 
     @mcp.tool(
         description=(
-            "Get the static reference list of all 13 detection rules with IDs, names, "
+            "Get the static reference list of all 15 detection rules with IDs, names, "
             "severities, and descriptions."
         )
     )
     async def get_rules_reference() -> dict[str, Any]:
         """
-        Get the static reference list of all 13 detection rules.
+        Get the static reference list of all 15 detection rules.
 
         Returns rule IDs, names, severities, and descriptions.
         This is embedded in the MCP package and requires no API call.
