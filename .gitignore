@@ -39,3 +39,6 @@ agent-memory/benchmark_results/*.md
 # OS
 .DS_Store
 Thumbs.db
+
+# Research paper results — local only, do not push
+paper_results/
