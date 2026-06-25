@@ -1,6 +1,6 @@
 # AGM — Agent Memory Management
 
-[![PyPI version](https://img.shields.io/pypi/v/agm-memory-mcp.svg)](https://pypi.org/project/agm-memory-mcp/)
+[![PyPI version](https://img.shields.io/pypi/v/agm-memory-mcp.svg)](https://pypi.org/project/agm-memory-mcp/0.1.0/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
 
