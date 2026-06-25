@@ -2,7 +2,7 @@
 
 > **Warning — database and Docker:** With **Docker Compose** (`cd agent-memory && docker compose up --build`), Postgres and Redis are included and the API’s **`DATABASE_URL`** is wired in compose — you **do not** need to set DB URLs in **`.env`** for that default run. If you run the API **without** Docker, you **must** provide **PostgreSQL (pgvector) + Redis** and correct **`DATABASE_URL` / `REDIS_URL`** in **`agent-memory/.env`**. The live server **always** needs a real database; skipping that is only possible if you only point MCP or other clients at **someone else’s** hosted API. Details: [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
 
-**MCP package on PyPI:** [agent-memory-mcp](https://pypi.org/project/agent-memory-mcp/)
+**MCP package on PyPI:** [agm-memory-mcp](https://pypi.org/project/agm-memory-mcp/)
 
 [![Python 3.11](https://img.shields.io/badge/python-3.11-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
