@@ -293,7 +293,7 @@ python backend/demo_simulation.py --attacks
 | Graph visualization | Three.js + @react-three/fiber + d3-force-3d |
 | MCP server | FastMCP + httpx |
 | Containers | Docker Compose |
-| Published package | `agm-memory-mcp` on PyPI (v0.1.2) |
+| Published package | `agm-memory-mcp` on PyPI (v0.1.2): https://pypi.org/project/agm-memory-mcp/ |
 
 ---
 
