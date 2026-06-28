@@ -66,9 +66,18 @@ export function DashboardPage() {
   const unackTotal = activeViolations.data?.total ?? 0;
   const criticalCount = critical24h.data ?? 0;
 
+  const lastUpdated = s
+    ? new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+    : null;
+
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
+      <div className="flex items-baseline justify-between">
+        <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
+        {lastUpdated && (
+          <span className="text-xs text-zinc-500">Updated {lastUpdated}</span>
+        )}
+      </div>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <Card>
