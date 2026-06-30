@@ -25,7 +25,10 @@ export default function App() {
     <div className="min-h-screen flex flex-col">
       <header className="border-b border-zinc-800 bg-zinc-900/90 backdrop-blur sticky top-0 z-10">
         <div className="mx-auto max-w-7xl px-4 py-3 flex items-center gap-8">
-          <span className="font-semibold text-emerald-400">Agent Memory</span>
+          <div className="flex flex-col leading-tight">
+            <span className="font-semibold text-emerald-400">Agent Memory</span>
+            <span className="text-[10px] text-zinc-500 tracking-wide">AGM</span>
+          </div>
           <nav className="flex flex-wrap gap-1 flex-1 min-w-0">
             {nav.map((n) => (
               <NavLink
