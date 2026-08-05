@@ -25,7 +25,8 @@ keywords = [
     "agent-security",
     "model-context-protocol",
     "memory-poisoning",
-    "behavioral-fingerprinting"
+    "behavioral-fingerprinting",
+    "trust-scoring"
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",
