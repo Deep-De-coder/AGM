@@ -185,3 +185,39 @@ async def test_write_memory_registers_new_session_once(
     # Auto-registered sessions must not vouch for a context_hash (RULE_012).
     assert rows[0].context_hash is None
     assert rows[0].outcome is None
+
+
+@pytest.mark.asyncio
+async def test_concurrent_flags_cannot_both_win(
+    client: AsyncClient,
+    override_db: None,
+    async_session_factory,
+) -> None:
+    """Reconsolidation lock: of two simultaneous flags, one must get 409 (no lost update)."""
+    import asyncio
+
+    ar = await client.post("/agents", json={"name": "race", "metadata": {}})
+    agent_id = ar.json()["id"]
+    w = await client.post(
+        "/memories",
+        json={
+            "content": "vault requires dual authorization",
+            "agent_id": agent_id,
+            "source_type": "tool_call",
+            "source_identifier": "t",
+            "safety_context": {},
+        },
+    )
+    mid = w.json()["memory_id"]
+    assert (await client.get(f"/memories/{mid}")).status_code == 200  # retrieval window
+
+    r1, r2 = await asyncio.gather(
+        client.post(f"/memories/{mid}/flag", json={"reason": "first"}),
+        client.post(f"/memories/{mid}/flag", json={"reason": "second"}),
+    )
+    assert sorted([r1.status_code, r2.status_code]) == [200, 409]
+    winner = r1 if r1.status_code == 200 else r2
+
+    async with async_session_factory() as s:
+        m = (await s.execute(select(Memory).where(Memory.id == uuid.UUID(mid)))).scalar_one()
+    assert m.flag_reason == winner.json()["reason"]

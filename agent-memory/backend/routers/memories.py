@@ -630,34 +630,50 @@ async def flag_memory(
 
     redis = await get_redis()
     guard = ReconsolidationGuard(redis)
-    ok = await guard.verify_snapshot(str(memory_id), memory, db)
-    if not ok:
+    # Hold the write-lock for the whole verify-then-write so two concurrent flags
+    # (or a flag during a retrieval window) cannot both pass the snapshot check.
+    if not await guard.acquire_lock(str(memory_id)):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=(
-                "Memory state changed during retrieval window. "
+                "Memory is locked by a concurrent retrieval or write. "
                 "Reload memory before flagging."
             ),
         )
+    try:
+        # Re-read under the lock: the row loaded above may predate a write
+        # committed by the previous lock holder.
+        await db.refresh(memory)
+        ok = await guard.verify_snapshot(str(memory_id), memory, db)
+        if not ok:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "Memory state changed during retrieval window. "
+                    "Reload memory before flagging."
+                ),
+            )
 
-    memory.is_flagged = True
-    memory.flag_reason = body.reason
+        memory.is_flagged = True
+        memory.flag_reason = body.reason
 
-    await log_memory_event(
-        db,
-        memory_id=memory.id,
-        event_type="anomaly_flagged",
-        performed_by_agent_id=body.performed_by_agent_id,
-        event_metadata={"reason": body.reason},
-    )
+        await log_memory_event(
+            db,
+            memory_id=memory.id,
+            event_type="anomaly_flagged",
+            performed_by_agent_id=body.performed_by_agent_id,
+            event_metadata={"reason": body.reason},
+        )
 
-    await redis.set(
-        trust_cache_key(str(memory.id)),
-        str(memory.trust_score),
-        ex=settings.trust_cache_ttl_seconds,
-    )
+        await redis.set(
+            trust_cache_key(str(memory.id)),
+            str(memory.trust_score),
+            ex=settings.trust_cache_ttl_seconds,
+        )
 
-    await db.commit()
+        await db.commit()
+    finally:
+        await guard.release_lock(str(memory_id))
     await db.refresh(memory)
     return {
         "memory_id": memory.id,

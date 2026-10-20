@@ -104,7 +104,7 @@ The DCA samples each recently-active agent and accumulates danger signals (weigh
 ### 4.3 Behavioral Hash + Drift Detection
 **Analog:** MHC self-peptide presentation — immune cells recognise "self" by molecular fingerprint. **Defends against:** identity spoofing, sleeper-cell persona drift.
 
-Each agent carries a rolling 10-dimensional behavioral vector (content length statistics, source distribution, write interval, flag rate, inter-agent fraction, safety context richness). After every write, a SHA256 hash of the vector is computed and compared to the stored baseline. Drift is a weighted sum: `0.2 × length_delta + 0.2 × source_JSD + 0.3 × interval_delta + 0.15 × flag_rate_delta + 0.15 × rest`. Drift > 0.4 pushes a HIGH notification and logs an anomaly event; RULE_011 checks the per-session write pattern against the baseline's μ ± 2σ bounds.
+Each agent carries a rolling 10-dimensional behavioral vector (content length statistics, source distribution, write interval, flag rate, inter-agent fraction, safety context richness). After every write, the vector over the agent's last 20 writes is hashed and compared to the agent's *previous* vector (not a fixed reference). Drift is a weighted sum of per-field relative differences, each bounded to [0, 1]: `0.2 × length_delta + 0.2 × source_JSD + 0.3 × interval_delta + 0.15 × flag_rate_delta + 0.15 × rest`. Drift > 0.4 pushes a HIGH notification and logs an anomaly event once the window holds at least 3 writes (fewer give degenerate statistics). Because consecutive windows differ by one write, gradual drift stays well below 0.4 (see Known Limitations); RULE_011 checks the per-session write pattern against the baseline's μ ± 2σ bounds.
 **Key location:** `lib/behavioral_hash.py: compute_behavioral_drift`, `rules/engine.py: _check_behavioral_drift`
 
 ### 4.4 Three-Signal Quorum Trust
@@ -128,7 +128,7 @@ At write time, a deterministic SHA256 is computed over pipe-joined canonical fie
 ### 4.7 Vector Clocks + Causal Chain Validation
 **Analog:** Temporal ordering in distributed systems — Lamport clocks prevent causality violations. **Defends against:** temporal phantom injection (memories that claim to follow events that never occurred).
 
-Every memory stores a vector clock (JSONB, 24-hour Redis TTL) and a list of `causal_parents` — the last 5 memories read by this agent in the prior 10 minutes. Validation checks that (a) a non-first memory has declared parents, (b) no parent has a `created_at` after the child, and (c) the child's vector clock is not behind any parent's clock. RULE_012 fires on any validation failure with severity HIGH and auto-flag.
+Every memory stores a vector clock (JSONB, 24-hour Redis TTL) and a list of `causal_parents` — the last 5 memories read by this agent in the prior 10 minutes. Validation checks that (a) a non-first memory has declared parents, (b) no parent has a `created_at` after the child, and (c) the child's vector clock is not behind any parent's clock. RULE_012 records a HIGH violation on any validation failure; separately, a memory older than 5 s whose chain fails validation on read is flagged. In practice clients cannot submit `causal_parents` (the server derives them), so a fabricated chain cannot be expressed through the API; RULE_012's effective signal is the unknown `context_hash`.
 **Key location:** `lib/vector_clock.py: validate_causal_chain`
 
 ### 4.8 Memory State Machine (Anergy / Quarantine / Consolidation)
@@ -202,25 +202,27 @@ State transitions are evaluated by the post-trust-maintenance pass that runs aft
 
 ---
 
-## 7. The 13 Detection Rules
+## 7. The 15 Detection Rules
 
 | Rule | Trigger | Severity | Defense response |
 |------|---------|----------|-----------------|
-| RULE_001 | Session write count > 50 | CRITICAL | Auto-flag memory, persist violation, CRITICAL notification |
-| RULE_002 | Agent read ≥ 3 flagged memories in session | HIGH | Auto-flag memory, persist violation, HIGH notification |
+| RULE_001 | Session write count > 50 | CRITICAL | Persist violation (marked `auto_flagged`), CRITICAL notification |
+| RULE_002 | Agent read ≥ 3 flagged memories in session | HIGH | Persist violation (marked `auto_flagged`), HIGH notification |
 | RULE_003 | Negated term in new memory appears positively in 3+ agent memories | MEDIUM | Persist violation (no auto-flag) |
-| RULE_004 | 5+ provenance events on one memory within 10 minutes | HIGH | Auto-flag memory, persist violation, HIGH notification |
+| RULE_004 | 5+ provenance events on one memory within 10 minutes | HIGH | Persist violation (marked `auto_flagged`), HIGH notification |
 | RULE_005 | High-stakes keywords (delete/credentials/api key/etc.) without `human_verified=True` | MEDIUM | Persist violation (no auto-flag) |
 | RULE_006 | `inter_agent` source written without a `session_id` | LOW | Persist violation (no auto-flag) |
 | RULE_007 | `safety_context.context_expires_at` is in the past | MEDIUM | Persist violation (no auto-flag) |
-| RULE_008 | Agent ID not found in `agents` table | HIGH | Auto-flag memory, persist violation, HIGH notification |
-| RULE_009 | 5+ memories with ≥ 0.9 SequenceMatcher similarity in same session | HIGH | Auto-flag memory, persist violation, HIGH notification |
-| RULE_010 | `trust_updated` event shows trust drop > 0.40 | HIGH | Auto-flag memory, persist violation, HIGH notification |
-| RULE_011 | Session write count or avg content length deviates > 2σ from registered baseline | HIGH | Auto-flag memory, persist violation, HIGH notification |
-| RULE_012 | `context_hash` missing/unknown, or causal chain validation fails | HIGH | Auto-flag memory, persist violation, HIGH notification |
+| RULE_008 | Agent ID not found in `agents` table | HIGH | Persist violation (marked `auto_flagged`), HIGH notification |
+| RULE_009 | 5+ memories with ≥ 0.9 SequenceMatcher similarity in same session | HIGH | Persist violation (marked `auto_flagged`), HIGH notification |
+| RULE_010 | `trust_updated` event shows trust drop > 0.40 | HIGH | Persist violation (marked `auto_flagged`), HIGH notification |
+| RULE_011 | Session write count or avg content length deviates > 2σ from registered baseline | HIGH | Persist violation (marked `auto_flagged`), HIGH notification |
+| RULE_012 | `context_hash` missing/unknown, or causal chain validation fails | HIGH | Persist violation (marked `auto_flagged`), HIGH notification |
 | RULE_013 | Direct query for `memory_state=anergic` | CRITICAL | HTTP 403 returned; violation persisted at query time |
+| RULE_014 | Propagated taint score > 0.8 | HIGH | Persist violation (marked `auto_flagged`), HIGH notification |
+| RULE_015 | Evaluation vs. production behavioral drift > 0.5 (sandbagging) | HIGH | Persist violation (marked `auto_flagged`), HIGH notification |
 
-Rules run synchronously in `check_memory_rules` after every write. RULE_013 is the sole write-time stub that fires at query time; its `check()` function returns `None`.
+Rules run synchronously in `check_memory_rules` after every write. `auto_flagged` is recorded on the violation row only; the rules engine never sets `is_flagged` on the memory (see Known Limitations). RULE_013 is the sole write-time stub that fires at query time; its `check()` function returns `None`.
 
 ---
 
@@ -339,6 +341,18 @@ A Vickrey-Clarke-Groves mechanism could replace the current fixed-threshold corr
 
 **No APM instrumentation.** There is no OpenTelemetry, Prometheus, or Datadog integration. Observability is limited to Python `logging` module output. Trust-cycle latency and rules-engine throughput are not tracked. Adding a `/metrics` endpoint would require instrumentation work.
 
-**Quorum slow signal cold-start problem.** New agents have no behavioral history, so `compute_slow_signal` returns 0.5 and decays from there with a 168-hour half-life. A genuinely new legitimate agent will have its memories scored at PARTIAL_QUORUM for the first several hours, applying a ×0.7 trust multiplier to all its writes. This is by design but may surprise operators onboarding trusted agents.
+**New identities start with maximum reputation.** `compute_slow_signal` starts at 1.0 and only subtracts for bad evidence; with no sessions the success rate defaults to 1.0, and the age term `_exp_decay(score, hours_since_agent, 168h)` *lowers* the score as an agent gets older. A brand-new identity therefore reaches FULL_QUORUM immediately (this is why the Identity Ghost attack is not contained), while a clean week-old agent drops to ~0.5. Inverting the age term so reputation accrues would put every agent younger than ~9 days at PARTIAL_QUORUM (×0.7 trust) — a product decision, not yet made.
+
+**Rule violations do not flag memories.** Rules marked `auto_flagged` only record that on the violation row. RULE_002 counts reads of *flagged* memories, so it can only fire when something else (manual flag, trust pass, DCA, integrity check) has flagged them. Enabling real auto-flagging today would flag most ordinary writes: RULE_012 fires on every memory whose `context_hash` is missing or unregistered, and RULE_011 fires for any agent after 20 writes without a `session_id` (all session-less writes count as one session against a default 10 ± 5 baseline).
+
+**Behavioral drift cannot see gradual change.** Drift compares consecutive 20-write windows, so a slow persona shift never crosses the 0.4 alarm. Anchoring drift to a frozen reference would fix that but needs a re-baselining policy for agents whose behavior legitimately evolves.
+
+**DCA context is stale within a burst.** `get_agent_context` returns the cached sample (60 s TTL) taken at the agent's first write, so a burst of writes shorter than a minute is judged on pre-burst behavior.
+
+**Consolidated memories are not write-locked, and contradiction quarantine is inactive.** No code path treats `consolidated` specially after the transition. `quarantine_contradicting_memories` only considers memories with an `embedding`, and nothing in the API writes embeddings, so the ANERGIC → QUARANTINED transition never fires.
+
+**`POST /memories/{id}/flag` has no authorization.** Any caller can flag any memory, halving its trust (`source_reliability_factor` 0.5).
+
+Measured effect of these gaps on the seven attack simulations: [`docs/BENCHMARK.md`](BENCHMARK.md) (currently 2/7 contained).
 
 **RULE_013 is enforced at query time only.** The `_check_anergy_bypass_attempt` rule check function in `rules/engine.py` unconditionally returns `None`; enforcement is handled separately in the memories router. Batch violation scans via `collect_violations` will not surface RULE_013 violations for already-stored anergic memories.

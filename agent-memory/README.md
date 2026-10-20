@@ -23,8 +23,8 @@ Multi-agent AI pipelines inherit a fundamental flaw from classical identity-base
                                     │
                                     ▼
                     ┌───────────────────────────────┐
-                    │    13-Rule Policy Check        │  RULE_001–013
-                    │    violations → DB + notify    │  auto-flag on breach
+                    │    15-Rule Policy Check        │  RULE_001–015
+                    │    violations → DB + notify    │
                     └───────────────┬───────────────┘
                                     │
                                     ▼
@@ -46,7 +46,7 @@ Multi-agent AI pipelines inherit a fundamental flaw from classical identity-base
             │                      │
             ▼                      ▼
        ┌──────────────────────────────┐
-       │        consolidated          │  locked; content hash verified
+       │        consolidated          │  ≥24 h old, trust > 0.8, session ok
        └──────────────────────────────┘
 
                                     │ continuous
@@ -65,11 +65,11 @@ Multi-agent AI pipelines inherit a fundamental flaw from classical identity-base
 
 1. **Trust Decay Engine** — Six-factor exponential decay; anomaly penalties compound multiplicatively on every write cycle. *(Memory T-cell half-life: high-fidelity sources decay slower)*
 
-2. **13 Detection Rules** — Policy rules evaluated on every write covering write floods, contradiction, drift, duplication, and injection patterns. *(Pattern recognition receptors: innate sensors for conserved danger motifs)*
+2. **15 Detection Rules** — Policy rules evaluated on every write covering write floods, contradiction, drift, duplication, and injection patterns. *(Pattern recognition receptors: innate sensors for conserved danger motifs)*
 
 3. **Dendritic Cell Agent (DCA)** — Scans the agent population for five damage signals; classifies each agent context as SAFE / SEMI_MATURE / MATURE_DANGER and emits notifications on escalation. *(Dendritic cells: sample the tissue microenvironment for damage-associated molecular patterns)*
 
-4. **Behavioral Fingerprinting** — MHC-style rolling hash of write patterns; triggers on >2σ deviation from the agent's registered baseline in content length or write rate. *(Major Histocompatibility Complex: unique molecular signature per immune cell identity)*
+4. **Behavioral Fingerprinting** — MHC-style rolling hash of each agent's last 20 writes, plus RULE_011 for >2σ deviation from the agent's registered baseline in content length or writes per session. *(Major Histocompatibility Complex: unique molecular signature per immune cell identity)*
 
 5. **Quorum Trust** — Fast, medium, and slow timescale signals must independently converge; quorum failure suppresses the trust multiplier toward zero. *(T-cell co-stimulation: a single signal alone induces anergy, not activation)*
 
@@ -78,6 +78,8 @@ Multi-agent AI pipelines inherit a fundamental flaw from classical identity-base
 7. **Reconsolidation Lock** — Write-locks a memory during retrieval to close the read-modify-write race window exploited by echo-chamber and injection attacks. *(Synaptic reconsolidation: memory is labile during recall and re-stabilizes before expression)*
 
 8. **Content Addressing** — SHA-256 hash stored on every write; silent mutation detected and flagged automatically on any subsequent read. *(DNA repair mechanisms: post-replication mutation detected before transcription)*
+
+These are the mechanisms as designed. How well they hold up against the seven attack simulations is measured, and currently partial: see [Attack Simulations](#attack-simulations) for results and known gaps.
 
 ---
 
@@ -257,7 +259,7 @@ trust_score = clamp(
 
 ---
 
-## 13 Detection Rules
+## 15 Detection Rules
 
 | Rule | Name | Severity | Trigger |
 |------|------|----------|---------|
@@ -271,11 +273,18 @@ trust_score = clamp(
 | RULE_008 | Anonymous Agent | HIGH | Agent ID not present in the agents registry |
 | RULE_009 | Bulk Duplicate Content | HIGH | 5+ memories with ≥90% text similarity in one session |
 | RULE_010 | Trust Cliff | HIGH | Trust score drops >0.4 in a single `trust_updated` event |
-| RULE_011 | Behavioral Drift | HIGH | Write pattern deviates >2σ from registered baseline |
+| RULE_011 | Behavioral Drift | HIGH | Avg content length or writes per session deviate >2σ from registered baseline |
 | RULE_012 | Causal Orphan | HIGH | `context_hash` absent or matches no known session state |
 | RULE_013 | Anergy Bypass | CRITICAL | Direct query for `anergic`-state memories (returns HTTP 403) |
+| RULE_014 | High-Taint Write | HIGH | Memory's propagated taint score > 0.8 |
+| RULE_015 | Sandbagging | HIGH | Agent's evaluation vs. production behavioral drift > 0.5 |
 
-Violations are persisted in the `rule_violations` table and surfaced through `check_violations`, `get_notifications`, and the Violations page in the frontend. RULE_001, RULE_002, RULE_004, RULE_008, RULE_009, RULE_011, and RULE_012 auto-flag the memory on detection.
+Violations are persisted in the `rule_violations` table and surfaced through `check_violations`, `get_notifications`, and the Violations page in the frontend.
+
+**Rules record violations; they do not flag memories.** Eleven rules (all but RULE_003, 005, 006 and 007) mark their violation `auto_flagged`, but the rules engine does not set `is_flagged` on the memory. Memories get flagged by an explicit `POST /memories/{id}/flag`, the periodic trust pass, DCA escalation, a failed causal-chain check on read, or a content-hash mismatch. Turning `auto_flagged` into real flags is not a safe switch today, because two rules fire on most ordinary writes:
+
+- RULE_012 fires on every memory whose `safety_context.context_hash` is missing or was never registered through `POST /admin/sessions`.
+- RULE_011 compares against a default baseline (10 ± 5 writes per session) and treats all of an agent's writes without a `session_id` as one session, so it fires for any agent after 20 session-less writes.
 
 ---
 
@@ -288,19 +297,32 @@ docker compose exec api python backend/demo_simulation.py
 # --reset clears previous demo data first (or POST /admin/reset-demo-data)
 ```
 
-1. **The Sleeper Cell** — Agent behaves normally for many writes then activates a drifted behavioral pattern; caught by the MHC behavioral hash and DCA MATURE_DANGER classification.
+**Current result: 2 of 7 contained.** Measured with the MINJA benchmark (`python backend/tests/benchmark_minja.py`, in-process) and the same result against the Docker stack. Details and metrics: [`docs/BENCHMARK.md`](../docs/BENCHMARK.md).
 
-2. **The Echo Chamber** — Concurrent read-modify-write race targeting a sensitive memory to inject content without a provenance record; blocked by the reconsolidation write-lock.
+| # | Attack | What it does | Defense exercised | Result |
+|---|--------|--------------|-------------------|--------|
+| 1 | **Sleeper Cell** | Behaves normally for 20 writes, then drifts gradually over 15 more | Behavioral hash + DCA | Not contained |
+| 2 | **Echo Chamber** | Two concurrent read-modify-write flags on a sensitive memory | Reconsolidation write-lock | **Contained**: one write gets HTTP 409, no lost update |
+| 3 | **Reputation Laundering Relay** | Poison relayed through a trusted agent to bypass direct trust filters | RULE_002 + quorum | Not contained; relayed writes are quarantined as `anergic` |
+| 4 | **Temporal Phantom** | Memory claiming to follow from a session state that never existed | RULE_012 causal orphan | Detected (RULE_012 violation), not contained |
+| 5 | **Anergy Escape** | Three colluding agents fake corroboration to promote a quarantined memory | Two-signal anergy + RULE_013 | **Contained**: HTTP 403, memory stays `anergic` |
+| 6 | **Identity Ghost** | New identity mimics a legitimate agent and writes high-stakes memories | Quorum slow signal | Not contained |
+| 7 | **Consolidation Hijack** | Contradicts and forges a trusted agent's long-term memory | Content hash + RULE_003 | Not contained; forgery is detected by hash |
 
-3. **The Reputation Laundering Relay** — Low-trust poison injected via a trusted relay agent to bypass direct trust filters; caught by RULE_002 trust-chain contamination and quorum degradation.
+### Known gaps (why 5 attacks are not contained)
 
-4. **The Temporal Phantom** — Memory fabricated to claim it is a consequence of events that never occurred; caught by RULE_012 causal-orphan detection and vector-clock validation.
+- **Sleeper Cell:** drift is measured between consecutive 20-write windows, so gradual drift never reaches the 0.4 alarm. The DCA classifies an agent from a sample cached at its first write (60 s TTL), so a short burst is judged on pre-attack behavior. RULE_011 does fire, but on write count, not drift (see Detection Rules).
+- **Reputation Laundering:** RULE_002 counts reads of *flagged* memories, and rules don't flag the memories they fire on, so the poison is never flagged when the relay reads it.
+- **Temporal Phantom:** the RULE_012 violation is recorded but the memory stays `active` and unflagged. Vector-clock validation can't help, because clients cannot submit causal parents, so there is no fabricated chain to reject.
+- **Identity Ghost:** a brand-new identity gets the maximum slow-signal score. No history counts as a clean history, and the age term *lowers* reputation as an agent gets older, so the ghost reaches `FULL_QUORUM`. Nothing compares behavioral hashes across agents.
+- **Consolidation Hijack:** the target never reaches `consolidated`, which needs ≥24 h age and a successful session outcome. Consolidated memories are not write-locked anyway. RULE_003 only catches a literal `not <term>` that contradicts 3+ memories from the same agent, so a paraphrased contradiction passes. The attacker's own `POST /memories/{id}/flag` halves the genuine memory's trust, because that endpoint has no authorization.
 
-5. **The Anergy Escape** — Three coordinated agents attempt artificial co-stimulation of a quarantined memory to force promotion; blocked by RULE_013 anergy-bypass gate (HTTP 403).
+Closing these requires design decisions with real false-positive costs, not threshold tweaks:
+- turning rule violations into flags (see Detection Rules)
+- making new identities earn reputation, which would put every agent under ~9 days old into partial quorum
+- a DCA danger signal fed by baseline-anchored drift
 
-6. **The Identity Ghost** — Perfect behavioral mimic with no reputation history attempts to write high-trust memories; caught by the quorum slow-signal gap and behavioral-hash mismatch.
-
-7. **The Consolidation Hijack** — Contradictory memories injected after a target reaches `consolidated` state to corrupt long-term agent belief; caught by content-address integrity check and RULE_003.
+`backend/tests/test_benchmark.py` is a regression gate on the contained set.
 
 ---
 

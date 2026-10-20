@@ -34,6 +34,24 @@ BEHAVIORAL_VECTOR_FIELDS = [
 
 _EPS = 1e-6
 
+# Below this many writes the window's std / write-interval stats are degenerate
+# (one or zero intervals), so a drift alarm would only measure cold start.
+_MIN_WRITES_FOR_DRIFT_ALARM = 3
+
+
+def _rel_diff(c: float, b: float) -> float:
+    """Symmetric relative difference in [0, 1]; 0 when both are ~0.
+
+    Dividing by |b| alone made any field whose previous value was 0 (e.g. a
+    content-length std of 0 after identical writes) explode to ~1e6 and raise
+    false "possible impersonation" alarms.
+    """
+    c, b = float(c), float(b)
+    denom = max(abs(c), abs(b))
+    if denom < _EPS:
+        return 0.0
+    return abs(c - b) / denom
+
 
 def _js_divergence(p: dict[str, float], q: dict[str, float]) -> float:
     keys = sorted(set(p.keys()) | set(q.keys()))
@@ -256,8 +274,7 @@ def hash_behavioral_vector(vector: dict[str, Any]) -> str:
 
 
 def compute_behavioral_drift(current_vector: dict[str, Any], baseline_vector: dict[str, Any]) -> float:
-    def nd(c: float, b: float) -> float:
-        return abs(float(c) - float(b)) / (abs(float(b)) + _EPS)
+    nd = _rel_diff
 
     ac = float(current_vector.get("avg_content_length", 0.0))
     bc = float(baseline_vector.get("avg_content_length", ac))
@@ -327,7 +344,7 @@ def _drifted_fields(
     ):
         c = float(current_vector.get(k, 0.0))
         b = float(baseline_vector.get(k, 0.0))
-        if abs(c - b) / (abs(b) + _EPS) > 0.3:
+        if _rel_diff(c, b) > 0.3:
             out.append(k)
     return out
 
@@ -382,7 +399,7 @@ async def update_agent_behavioral_hash(
     agent.behavioral_drift_score = drift
     await db.flush()
 
-    if drift > 0.4:
+    if drift > 0.4 and len(recent) >= _MIN_WRITES_FOR_DRIFT_ALARM:
         try:
             r = await get_redis()
             await push_notification(

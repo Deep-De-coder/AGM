@@ -7,6 +7,9 @@ against 7 canonical adversarial memory manipulation attacks.  Each attack runs
 in a fully isolated SQLite + FakeRedis environment; state never bleeds between
 runs.
 
+**Current result: 2/7 contained** (Echo Chamber, Anergy Escape). Per-attack
+numbers, failing checks and root causes: [`../../docs/BENCHMARK.md`](../../docs/BENCHMARK.md#baseline-scores).
+
 ### Running the benchmark
 
 ```bash
@@ -56,6 +59,10 @@ The **escaped due to ablation** flag for a `(defense, attack)` cell is:
 ```
 escaped_due_to_ablation = baseline_contained AND NOT contained_with_defense_disabled
 ```
+
+Only attacks contained at baseline can show an ablation effect, so with the
+current 2/7 baseline the matrix is informative for Echo Chamber and Anergy
+Escape only.
 
 ### Defense toggles
 

@@ -118,6 +118,13 @@ async def _post_check_rules(client: httpx.AsyncClient, memory_id: str) -> None:
         raise SystemExit(1)
 
 
+def _print_result(caught: bool, contained_by: str) -> None:
+    if caught:
+        print(f"✓ CONTAINED: {contained_by}")
+    else:
+        print(f"✗ NOT CONTAINED (needed: {contained_by}); see evidence in the summary")
+
+
 def _attack_header(n: int, attack_name: str, mechanism: str, analog: str) -> None:
     print("\n" + "=" * 60)
     print(f"ATTACK {n}: {attack_name}")
@@ -286,8 +293,7 @@ async def attack_1_sleeper_cell(
         )
     except Exception as e:
         notes.append(f"attack error: {e}")
-    print(f"✓ CAUGHT: {'behavioral drift + DCA context escalation' if caught else 'not fully'}")
-    print(f"✗ BYPASSED: {'none' if caught else 'partial drift escalation'}")
+    _print_result(caught, "behavioral drift + DCA context escalation")
     return {"caught": caught, "evidence": evidence, "notes": "; ".join(notes)}
 
 
@@ -398,15 +404,7 @@ async def attack_2_echo_chamber(
         )
     except Exception as e:
         notes.append(f"attack error: {e}")
-    print(
-        "✓ CAUGHT: "
-        + (
-            "reconsolidation lock + safe retrieval filter + hash integrity"
-            if caught
-            else "not fully"
-        )
-    )
-    print(f"✗ BYPASSED: {'none' if caught else 'partial race or filter bypass'}")
+    _print_result(caught, "reconsolidation lock + safe retrieval filter + hash integrity")
     return {"caught": caught, "evidence": evidence, "notes": "; ".join(notes)}
 
 
@@ -533,15 +531,7 @@ async def attack_3_reputation_laundering_relay(
         )
     except Exception as e:
         notes.append(f"attack error: {e}")
-    print(
-        "✓ CAUGHT: "
-        + (
-            "low-trust chain violation + medium-signal degradation"
-            if caught
-            else "not fully"
-        )
-    )
-    print(f"✗ BYPASSED: {'none' if caught else 'partial laundering'}")
+    _print_result(caught, "low-trust chain violation + medium-signal degradation")
     return {"caught": caught, "evidence": evidence, "notes": "; ".join(notes)}
 
 
@@ -622,8 +612,7 @@ async def attack_4_temporal_phantom(
         evidence = f"first_catch={first}, chain_valid={chain_valid}, flagged={flagged}, state={state}"
     except Exception as e:
         notes.append(f"attack error: {e}")
-    print(f"✓ CAUGHT: {'RULE_012/causal validation rejected orphan' if caught else 'not fully'}")
-    print(f"✗ BYPASSED: {'none' if caught else 'partial structural spoofing'}")
+    _print_result(caught, "RULE_012/causal validation rejected orphan")
     return {"caught": caught, "evidence": evidence, "notes": "; ".join(notes)}
 
 
@@ -758,8 +747,7 @@ async def attack_5_anergy_escape(
         )
     except Exception as e:
         notes.append(f"attack error: {e}")
-    print(f"✓ CAUGHT: {'RULE_013 + anergy retention' if caught else 'partial'}")
-    print(f"✗ BYPASSED: {'none' if caught else 'witness corroboration partially effective'}")
+    _print_result(caught, "RULE_013 + anergy retention")
     return {"caught": caught, "evidence": evidence, "notes": "; ".join(notes)}
 
 
@@ -870,15 +858,7 @@ async def attack_6_identity_ghost(
         )
     except Exception as e:
         notes.append(f"attack error: {e}")
-    print(
-        "✓ CAUGHT: "
-        + (
-            "slow-signal reputation floor prevented instant mimicry takeover"
-            if caught
-            else "not fully"
-        )
-    )
-    print(f"✗ BYPASSED: {'none' if caught else 'partial mimic success'}")
+    _print_result(caught, "slow-signal reputation floor prevented instant mimicry takeover")
     return {"caught": caught, "evidence": evidence, "notes": "; ".join(notes)}
 
 
@@ -997,15 +977,7 @@ async def attack_7_consolidation_hijack(
         )
     except Exception as e:
         notes.append(f"attack error: {e}")
-    print(
-        "✓ CAUGHT: "
-        + (
-            "content-address integrity + contradiction rule + trust delta"
-            if caught
-            else "not fully"
-        )
-    )
-    print(f"✗ BYPASSED: {'none' if caught else 'partial post-consolidation manipulation'}")
+    _print_result(caught, "content-address integrity + contradiction rule + trust delta")
     return {"caught": caught, "evidence": evidence, "notes": "; ".join(notes)}
 
 
@@ -1044,13 +1016,13 @@ async def run_attack_simulations(base_url: str, session: httpx.AsyncClient) -> N
         else:
             partial_count += 1
         print(f"Attack {n}: {name}")
-        print(f"  Status:    {'CAUGHT' if caught else 'PARTIAL BYPASS'}")
+        print(f"  Status:    {'CONTAINED' if caught else 'NOT CONTAINED'}")
         print(f"  Defender:  {mech}")
         print(f"  Evidence:  {out.get('evidence', '')}")
         print()
     print("Total attacks simulated: 7")
-    print(f"Fully caught: {caught_count}")
-    print(f"Partial bypass (expected + documented): {partial_count}")
+    print(f"Contained: {caught_count}")
+    print(f"Not contained: {partial_count} (known gaps: README.md, 'Attack Simulations')")
     print()
     print("Defense-in-depth coverage:")
     print("  Identity layer:  DCA, Behavioral Hash, Quorum")
