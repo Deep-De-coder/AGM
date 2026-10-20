@@ -143,7 +143,7 @@ Install the published package:
 pip install agm-memory-mcp
 ```
 
-> If `agm-memory-mcp` fails with `No module named 'mcp.server.fastmcp'`, you have 0.1.2 with MCP SDK 2.x; run `pip install "mcp<2"` (fixed in 0.1.3, which pins it).
+> If `agm-memory-mcp` fails with `No module named 'mcp.server.fastmcp'`, you have 0.1.2 with MCP SDK 2.x; run `pip install "mcp<2"` (fixed in 0.1.4, which pins it).
 
 Verify connectivity before configuring your host:
 

@@ -3,7 +3,9 @@
 All notable changes to `agm-memory-mcp` are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
-## [0.1.3] — unreleased
+## [0.1.4] — unreleased
+
+0.1.3 was never published; this is the first release after 0.1.2.
 
 ### Fixed
 - Pin `mcp<2`: MCP SDK 2.x renamed `FastMCP`, so 0.1.2 crashed on startup

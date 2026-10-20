@@ -57,7 +57,7 @@ from backend.models import RuleViolation as RuleViolationORM
 
 # ── constants ─────────────────────────────────────────────────────────────────
 
-_VERSION = "0.1.2"
+_VERSION = "0.1.4"
 
 _BENCHMARK_RESULTS_DIR = _PROJECT_ROOT / "benchmark_results"
 
