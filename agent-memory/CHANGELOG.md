@@ -3,7 +3,7 @@
 All notable changes to `agm-memory-mcp` are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
-## [0.1.4] — unreleased
+## [0.1.4] — 2026-10-20
 
 0.1.3 was never published; this is the first release after 0.1.2.
 

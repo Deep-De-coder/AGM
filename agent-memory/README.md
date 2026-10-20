@@ -1,6 +1,6 @@
 # AGM — Agent Memory Management
 
-[![PyPI version](https://img.shields.io/pypi/v/agm-memory-mcp.svg)](https://pypi.org/project/agm-memory-mcp/0.1.0/)
+[![PyPI version](https://img.shields.io/pypi/v/agm-memory-mcp.svg)](https://pypi.org/project/agm-memory-mcp/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
 
@@ -143,7 +143,7 @@ Install the published package:
 pip install agm-memory-mcp
 ```
 
-> If `agm-memory-mcp` fails with `No module named 'mcp.server.fastmcp'`, you have 0.1.2 with MCP SDK 2.x; run `pip install "mcp<2"` (fixed in 0.1.4, which pins it).
+> If `agm-memory-mcp` fails with `No module named 'mcp.server.fastmcp'`, you have 0.1.2 with MCP SDK 2.x; upgrade with `pip install -U agm-memory-mcp` (0.1.4 pins `mcp<2`).
 
 Verify connectivity before configuring your host:
 
@@ -339,7 +339,7 @@ Closing these requires design decisions with real false-positive costs, not thre
 | Graph visualization | Three.js + @react-three/fiber + d3-force-3d |
 | MCP server | FastMCP + httpx |
 | Containers | Docker Compose |
-| Published package | `agm-memory-mcp` on PyPI (v0.1.2): https://pypi.org/project/agm-memory-mcp/ |
+| Published package | `agm-memory-mcp` on PyPI (v0.1.4): https://pypi.org/project/agm-memory-mcp/ |
 
 ---
 
