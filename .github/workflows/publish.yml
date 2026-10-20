@@ -37,6 +37,9 @@ jobs:
     needs: test
     runs-on: ubuntu-latest
     permissions:
+      # Listing any permission drops the rest to none; checkout of this private
+      # repo needs contents: read.
+      contents: read
       id-token: write
     steps:
       - uses: actions/checkout@v4
