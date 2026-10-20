@@ -3,6 +3,8 @@ name: Publish agm-memory-mcp to PyPI
 on:
   release:
     types: [published]
+  # Manual run (Actions tab → "Run workflow"), e.g. on a version tag.
+  workflow_dispatch:
 
 jobs:
   test:
@@ -60,4 +62,9 @@ jobs:
         env:
           TWINE_USERNAME: __token__
           TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
-        run: twine upload dist/*
+        run: |
+          if [ -z "$TWINE_PASSWORD" ]; then
+            echo "::error::Repository secret PYPI_API_TOKEN is not set (Settings → Secrets and variables → Actions)."
+            exit 1
+          fi
+          twine upload dist/*
