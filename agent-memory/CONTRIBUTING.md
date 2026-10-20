@@ -21,11 +21,17 @@ export PYTHONPATH=.
 pytest backend/tests/ -v --tb=short
 ```
 
-Lint (same layout as CI):
+Lint (same as CI):
 
 ```bash
-ruff check backend/
-ruff format --check backend/
+ruff check backend/ agent_memory_mcp/ tests/
+```
+
+MCP package tests (separate install, mocks HTTP — no stack needed):
+
+```bash
+pip install -e ".[test]"
+pytest tests/test_mcp_tools.py
 ```
 
 ## Run the full stack with Docker Compose
@@ -38,7 +44,9 @@ docker compose up --build
 - API: `http://localhost:8000` (OpenAPI: `/docs`)
 - Dashboard (if enabled in compose): `http://localhost:3000`
 
-Ensure ports `5432`, `6379`, `8000`, and `3000` are free or adjust `docker-compose.yml`.
+If ports `5432`, `6379`, `8000` or `3000` are taken, override them with `POSTGRES_PORT`, `REDIS_PORT`, `API_PORT`, `FRONTEND_PORT` (see the Troubleshooting table in [`README.md`](README.md#troubleshooting)).
+
+CI also runs `docker compose up --build` plus `smoke_test.py` and the demo against it, so a change that breaks migrations or the quick start fails the PR.
 
 For when you need **`.env`** vs compose defaults (local API without full stack), see [`../docs/DEPLOYMENT.md`](../docs/DEPLOYMENT.md).
 

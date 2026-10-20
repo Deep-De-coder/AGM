@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import pytest
 
-from backend.tests.ablation_toggles import DEFENSE_TOGGLES, DefenseToggle
+from backend.tests.ablation_toggles import DEFENSE_TOGGLES
 from backend.tests.ablation_runner import (
     AblationCell,
     AblationResult,
     AblationRunner,
     generate_ablation_report,
 )
-from backend.tests.benchmark_minja import AttackResult, MINJABenchmark, _ATTACKS
+from backend.tests.benchmark_minja import AttackResult, MINJABenchmark
 
 
 # ---------------------------------------------------------------------------

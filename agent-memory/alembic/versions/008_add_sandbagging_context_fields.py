@@ -1,6 +1,6 @@
 """add sandbagging context fields: Session.context_type, Agent.evaluation_behavioral_vector
 
-Revision ID: 008_add_sandbagging_context_fields
+Revision ID: 008_sandbagging_context_fields
 Revises: 007_add_taint_tracking_fields
 Create Date: 2026-06-14
 
@@ -13,7 +13,7 @@ from sqlalchemy.dialects import postgresql
 
 from alembic import op
 
-revision: str = "008_add_sandbagging_context_fields"
+revision: str = "008_sandbagging_context_fields"
 down_revision: str | None = "007_add_taint_tracking_fields"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None

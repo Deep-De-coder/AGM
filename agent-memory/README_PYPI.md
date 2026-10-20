@@ -42,7 +42,14 @@ agm-memory-mcp --help
 - Python 3.11+
 - A running AgentMemory HTTP API endpoint
 
-This package is the MCP bridge. It does not embed the full backend.
+This package is the MCP bridge. It does not embed the full backend. To run the
+backend locally (needs only Docker):
+
+```bash
+git clone https://github.com/Deep-De-coder/AGM
+cd AGM/agent-memory
+docker compose up --build        # API on http://localhost:8000
+```
 
 ---
 
@@ -142,7 +149,7 @@ You can also use env vars instead of args.
 
 ## Rule Model
 
-AGM includes 13 embedded detection rules (`RULE_001` through `RULE_013`) for:
+AGM includes 15 embedded detection rules (`RULE_001` through `RULE_015`) for:
 
 - write flooding
 - trust-chain contamination
@@ -157,6 +164,8 @@ AGM includes 13 embedded detection rules (`RULE_001` through `RULE_013`) for:
 - behavioral drift
 - causal orphan detection
 - anergy bypass attempts
+- high-taint writes (causal contamination)
+- sandbagging (evaluation vs. production behavior gap)
 
 Use `get_rules_reference` to inspect rule metadata at runtime.
 

@@ -2,8 +2,9 @@ import type { ViolationSeverity } from "./lib/severity";
 
 export type { ViolationSeverity };
 
-export const API_BASE =
-  import.meta.env.VITE_API_URL ?? "http://localhost:8000";
+// Same-origin by default: the Vite dev server and the Docker nginx both proxy /api.
+// Set VITE_API_URL (e.g. http://localhost:8000) to call an API directly instead.
+export const API_BASE = import.meta.env.VITE_API_URL ?? "/api";
 
 async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
   const headers: Record<string, string> = {
@@ -226,8 +227,9 @@ export type Violation = {
   id: string;
   rule_name: string;
   severity: ViolationSeverity;
-  description: string;
-  memory_id: string;
+  description: string | null;
+  /** null for violations not tied to one memory (e.g. RULE_013 query blocks). */
+  memory_id: string | null;
   agent_id?: string;
   agent_name: string | null;
   detected_at: string;

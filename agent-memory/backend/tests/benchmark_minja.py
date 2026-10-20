@@ -20,14 +20,12 @@ from __future__ import annotations
 import asyncio
 import fnmatch
 import importlib
-import json
 import platform
 import sys
 import time
-import uuid
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -41,7 +39,6 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import JSON, select
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.pool import StaticPool
 
 from backend.database import Base, get_db
@@ -620,7 +617,7 @@ def build_report(results: list[AttackResult]) -> str:
         lines.append("")
         lines.append(f"- **Verdict**: {r.verdict}")
         lines.append(
-            f"- **TTC**: "
+            "- **TTC**: "
             + (f"{r.ttc_ms:.0f} ms" if r.ttc_ms is not None else "N/A (escaped)")
         )
         lines.append(f"- **Propagation Factor**: {r.propagation_factor:.4f}")

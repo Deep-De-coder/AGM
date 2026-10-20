@@ -5,12 +5,10 @@ from __future__ import annotations
 import uuid
 
 import pytest
-import pytest_asyncio
 from httpx import AsyncClient
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.models import Agent, Memory, MemoryProvenanceLog
+from backend.models import Memory
 
 
 # ---------------------------------------------------------------------------
@@ -130,7 +128,7 @@ async def test_verify_integrity_and_recover_endpoint(
 ) -> None:
     agent_id = await _create_agent_via_api(client)
     # Write two memories: one clean, one tampered
-    clean_id = await _write_memory_via_api(client, agent_id)
+    await _write_memory_via_api(client, agent_id)
     tampered_id = await _write_memory_via_api(client, agent_id)
     tampered_uuid = uuid.UUID(tampered_id)
 

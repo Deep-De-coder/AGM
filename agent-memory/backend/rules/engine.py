@@ -446,7 +446,7 @@ def _check_trust_score_cliff(ctx: RuleContext) -> RuleViolation | None:
 
 
 def _check_high_taint_write(ctx: RuleContext) -> RuleViolation | None:
-    taint = float(getattr(ctx.memory, "taint_score", 0.0))
+    taint = float(getattr(ctx.memory, "taint_score", None) or 0.0)
     if taint <= 0.8:
         return None
     sources = getattr(ctx.memory, "taint_sources", None) or {}

@@ -1,4 +1,5 @@
-# Lean CI: backend lint+test + MCP smoke. Est. runtime: ~2min
+# Backend lint+test, MCP package, frontend build, and a real `docker compose up`
+# run of the README quick start (smoke test + demo against Postgres/Redis).
 
 name: CI
 
@@ -37,7 +38,7 @@ jobs:
         run: ruff check backend/
 
       - name: Test
-        run: pytest backend/tests/ -x -q --timeout=30
+        run: pytest backend/tests/ -q --timeout=30
         env:
           PYTHONPATH: .
 
@@ -63,7 +64,69 @@ jobs:
             ${{ runner.os }}-mcp-pip-
 
       - name: Install MCP package
-        run: pip install .
+        run: pip install ".[test]" ruff
+
+      - name: Lint
+        run: ruff check agent_memory_mcp/ tests/
+
+      - name: Test
+        run: pytest tests/test_mcp_tools.py -q
 
       - name: Smoke test
         run: agm-memory-mcp --help
+
+  frontend-build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: agent-memory/frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: agent-memory/frontend/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck + build
+        run: npm run build
+
+  compose-e2e:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: agent-memory
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: docker compose up (README quick start)
+        run: docker compose up --build --detach --wait --wait-timeout 300
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Smoke test
+        run: |
+          pip install httpx
+          python smoke_test.py
+
+      - name: Demo simulation (as documented)
+        run: docker compose exec -T api python backend/demo_simulation.py
+
+      - name: Dashboard reaches the API through its /api proxy
+        run: curl -sf http://localhost:3000/api/health
+
+      - name: Container logs
+        if: failure()
+        run: docker compose logs --tail=200
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v

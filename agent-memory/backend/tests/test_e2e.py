@@ -26,6 +26,7 @@ from httpx import ASGITransport, AsyncClient
 
 from agent_memory_mcp.client import AgentMemoryClient
 from backend.main import app
+from backend.rules.engine import PREDEFINED_RULES
 
 
 @pytest.fixture(autouse=True)
@@ -342,7 +343,7 @@ async def test_e2e_full_system_flow(
         assert any("RULE_005" in v.get("rule_name", "") for v in viols)
 
         rules = await mcp.get_rules_reference()
-        assert len(rules) == 13
+        assert rules["total"] == len(rules["rules"]) == len(PREDEFINED_RULES)
 
         await mcp.aclose()
 

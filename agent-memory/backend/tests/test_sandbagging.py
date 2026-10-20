@@ -5,13 +5,12 @@ from __future__ import annotations
 import uuid
 
 import pytest
-import pytest_asyncio
 from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.lib.behavioral_hash import compute_context_drift
-from backend.models import Agent, Memory, Session as SessionRow
+from backend.models import Agent, Memory
 from backend.rules.checker import check_memory_rules
 
 

@@ -12,7 +12,8 @@ const SEVERITIES: ViolationSeverity[] = [
   "LOW",
 ];
 
-function truncate(s: string, n: number) {
+function truncate(s: string | null, n: number) {
+  if (!s) return "—";
   if (s.length <= n) return s;
   return s.slice(0, n) + "…";
 }
@@ -239,13 +240,17 @@ export function ViolationsPage() {
                 </td>
                 <td className="p-2 max-w-xs">{truncate(v.description, 80)}</td>
                 <td className="p-2">
-                  <Link
-                    to={`/memories?memory=${encodeURIComponent(v.memory_id)}`}
-                    className="text-emerald-400 hover:underline font-mono text-xs"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    {v.memory_id.slice(0, 8)}…
-                  </Link>
+                  {v.memory_id ? (
+                    <Link
+                      to={`/memories?memory=${encodeURIComponent(v.memory_id)}`}
+                      className="text-emerald-400 hover:underline font-mono text-xs"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      {v.memory_id.slice(0, 8)}…
+                    </Link>
+                  ) : (
+                    "—"
+                  )}
                 </td>
                 <td className="p-2">{v.agent_name ?? "—"}</td>
                 <td className="p-2 text-zinc-500 whitespace-nowrap text-xs">
@@ -288,12 +293,16 @@ export function ViolationsPage() {
             </Card>
             <Card>
               <p className="text-xs text-zinc-500 mb-1">Memory</p>
-              <Link
-                className="text-emerald-400 text-sm font-mono break-all hover:underline"
-                to={`/memories?memory=${encodeURIComponent(selected.memory_id)}`}
-              >
-                {selected.memory_id}
-              </Link>
+              {selected.memory_id ? (
+                <Link
+                  className="text-emerald-400 text-sm font-mono break-all hover:underline"
+                  to={`/memories?memory=${encodeURIComponent(selected.memory_id)}`}
+                >
+                  {selected.memory_id}
+                </Link>
+              ) : (
+                <p className="text-sm">—</p>
+              )}
             </Card>
             <Card>
               <p className="text-xs text-zinc-500 mb-1">Agent</p>

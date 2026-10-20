@@ -9,6 +9,8 @@ from typing import Any
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse
 from sqlalchemy import exists, func, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -75,6 +77,19 @@ def _reality_score_from_safety(safety: dict[str, Any]) -> float | None:
         return float(raw)
     except (TypeError, ValueError):
         return None
+
+
+async def _ensure_session_row(db: AsyncSession, session_id: uuid.UUID) -> None:
+    """Register a client-chosen ``session_id`` on first use.
+
+    ``memories.session_id`` is a foreign key to ``sessions``, but clients pick their
+    own session UUIDs. Insert a bare row (no context_hash / outcome, so RULE_012 and
+    outcome lookups behave as if no row existed); ON CONFLICT keeps it race-safe.
+    """
+    insert = pg_insert if db.get_bind().dialect.name == "postgresql" else sqlite_insert
+    await db.execute(
+        insert(SessionRow).values(id=session_id).on_conflict_do_nothing(index_elements=["id"])
+    )
 
 
 async def _run_rule_checks_after_write(memory_id: str) -> None:
@@ -156,6 +171,9 @@ async def create_memory(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found"
         )
+
+    if body.session_id is not None:
+        await _ensure_session_row(db, body.session_id)
 
     mem_payload = body.model_dump()
     memory = Memory(

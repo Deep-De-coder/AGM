@@ -83,7 +83,7 @@ Multi-agent AI pipelines inherit a fundamental flaw from classical identity-base
 
 ## Quickstart
 
-**Requires:** Docker and Docker Compose.
+**Requires:** Docker with Compose v2 (Docker Desktop, or Docker Engine + compose plugin). No Python or Node needed on the host. Works on Linux, macOS (Intel and Apple Silicon) and Windows.
 
 ```bash
 git clone https://github.com/Deep-De-coder/AGM
@@ -91,13 +91,34 @@ cd AGM/agent-memory
 docker compose up --build
 ```
 
+Then, in a second terminal in the same folder, load demo data (agents, rule violations, the 7 attack simulations):
+
+```bash
+docker compose exec api python backend/demo_simulation.py          # add --reset to start clean
+```
+
+On macOS/Linux/WSL, `./run.sh` builds, waits for the API to be healthy, and runs the demo in one go.
+
 | Service | URL |
 |---------|-----|
 | Frontend dashboard | http://localhost:3000 |
 | API + Swagger UI   | http://localhost:8000/docs |
 | Health check       | http://localhost:8000/health |
 
-The API container runs `alembic upgrade head` before starting Uvicorn. No manual database setup is required.
+The API container runs `alembic upgrade head` before starting Uvicorn. No manual database setup is required. The dashboard talks to the API through its own `/api` proxy, so it also works when opened from another machine (`http://<server>:3000`).
+
+Stop with `docker compose down`; add `-v` to also delete the database volume.
+
+### Troubleshooting
+
+| Symptom | Fix |
+|---------|-----|
+| `port is already allocated` / `address already in use` | Another service uses 5432, 6379, 8000 or 3000 (often a local Postgres or Redis). Pick other host ports: `POSTGRES_PORT=5433 REDIS_PORT=6380 API_PORT=8001 FRONTEND_PORT=3001 docker compose up --build` (or put them in a `.env` file next to `docker-compose.yml`). |
+| `Cannot connect to the Docker daemon` | Start Docker Desktop (or `sudo systemctl start docker`) and retry. |
+| `unknown flag: --wait` or `docker-compose: command not found` | You have the legacy Compose v1. Install Compose v2 (bundled with current Docker Desktop). |
+| API container keeps restarting / exits | `docker compose logs api`. If it is a migration error after switching branches, reset the dev database with `docker compose down -v`. |
+
+Postgres and Redis are published on `127.0.0.1` only (default credentials); the API (8000) and dashboard (3000) listen on all interfaces and have **no authentication** — don't expose them to untrusted networks.
 
 ### Environment variables (Docker defaults)
 
@@ -108,6 +129,7 @@ The API container runs `alembic upgrade head` before starting Uvicorn. No manual
 | `TRUST_CACHE_TTL_SECONDS` | `60` | Trust score Redis TTL |
 | `SESSION_WRITES_CACHE_TTL_SECONDS` | `3600` | Write-counter Redis TTL |
 | `DEBUG` | `false` | SQL echo |
+| `POSTGRES_PORT` / `REDIS_PORT` / `API_PORT` / `FRONTEND_PORT` | `5432` / `6379` / `8000` / `3000` | Host ports published by `docker-compose.yml` |
 
 ---
 
@@ -118,6 +140,8 @@ Install the published package:
 ```bash
 pip install agm-memory-mcp
 ```
+
+> If `agm-memory-mcp` fails with `No module named 'mcp.server.fastmcp'`, you have 0.1.2 with MCP SDK 2.x; run `pip install "mcp<2"` (fixed in 0.1.3, which pins it).
 
 Verify connectivity before configuring your host:
 
@@ -257,11 +281,11 @@ Violations are persisted in the `rule_violations` table and surfaced through `ch
 
 ## Attack Simulations
 
-Seven novel multi-agent attack scenarios are implemented end-to-end in `backend/demo_simulation.py`. Run against a live stack:
+Seven novel multi-agent attack scenarios are implemented end-to-end in `backend/demo_simulation.py` and run at the end of every demo:
 
 ```bash
-python backend/demo_simulation.py --attacks
-# POST /admin/reset-demo-data to clean up afterward
+docker compose exec api python backend/demo_simulation.py
+# --reset clears previous demo data first (or POST /admin/reset-demo-data)
 ```
 
 1. **The Sleeper Cell** — Agent behaves normally for many writes then activates a drifted behavioral pattern; caught by the MHC behavioral hash and DCA MATURE_DANGER classification.
@@ -285,7 +309,7 @@ python backend/demo_simulation.py --attacks
 | Layer | Technology |
 |-------|-----------|
 | API | FastAPI + Python 3.11+ |
-| Database | PostgreSQL 16 + pgvector |
+| Database | PostgreSQL 15 + pgvector |
 | Cache | Redis 7 |
 | Schema migrations | Alembic |
 | ORM | SQLAlchemy 2.0 (async) |
@@ -297,7 +321,17 @@ python backend/demo_simulation.py --attacks
 
 ---
 
-## Local Development (without Docker)
+## Local Development (hot reload)
+
+API and dashboard run on your machine; Postgres + Redis still come from Docker. Needs Python 3.11+ and Node 18+.
+
+On macOS/Linux/WSL, one command does all of the below (venv, `.env`, infra, migrations, both dev servers):
+
+```bash
+./dev.sh          # API on :8000, dashboard on :5173; Ctrl+C stops both
+```
+
+Manually:
 
 ```bash
 cd agent-memory
@@ -306,14 +340,14 @@ pip install -r requirements.txt
 
 docker compose up -d postgres redis   # infra only
 
-cp .env.example .env
+cp .env.example .env                  # Windows: copy .env.example .env
 alembic upgrade head
 
-export PYTHONPATH=$PWD                # Windows: set PYTHONPATH=%CD%
+export PYTHONPATH=$PWD                # Windows PowerShell: $env:PYTHONPATH = "$PWD"
 uvicorn backend.main:app --reload --port 8000
 ```
 
-Frontend dev server (Vite, hot-reload):
+Frontend dev server (Vite, hot-reload; proxies `/api` to `http://localhost:8000`, override with `PROXY_API_TARGET`):
 
 ```bash
 cd frontend && npm install && npm run dev
@@ -324,7 +358,7 @@ cd frontend && npm install && npm run dev
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). Backend changes must pass `ruff check .` with zero errors. Frontend changes must pass `npx tsc --noEmit` and `npm run build`.
+See [CONTRIBUTING.md](CONTRIBUTING.md). Backend changes must pass `ruff check .` and `pytest backend/tests/`. Frontend changes must pass `npm run build` (includes the TypeScript check).
 
 ## License
 

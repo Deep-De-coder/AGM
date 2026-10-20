@@ -150,3 +150,38 @@ async def test_flag_memory_reduces_trust(
         m = result.scalar_one()
         assert m.trust_score < before
         assert m.trust_score >= 0.0
+
+
+@pytest.mark.asyncio
+async def test_write_memory_registers_new_session_once(
+    client: AsyncClient,
+    override_db: None,
+    async_session_factory,
+) -> None:
+    from backend.models import Session as SessionRow
+
+    ar = await client.post("/agents", json={"name": "sess-writer", "metadata": {}})
+    agent_id = ar.json()["id"]
+    session_id = str(uuid.uuid4())
+    for i in range(2):
+        r = await client.post(
+            "/memories",
+            json={
+                "content": f"note {i}",
+                "agent_id": agent_id,
+                "source_type": "tool_call",
+                "source_identifier": "t",
+                "safety_context": {"context_hash": "client-ctx"},
+                "session_id": session_id,
+            },
+        )
+        assert r.status_code == 201, r.text
+
+    async with async_session_factory() as s:
+        rows = (
+            await s.execute(select(SessionRow).where(SessionRow.id == uuid.UUID(session_id)))
+        ).scalars().all()
+    assert len(rows) == 1
+    # Auto-registered sessions must not vouch for a context_hash (RULE_012).
+    assert rows[0].context_hash is None
+    assert rows[0].outcome is None

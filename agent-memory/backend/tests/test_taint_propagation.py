@@ -5,7 +5,6 @@ from __future__ import annotations
 import uuid
 
 import pytest
-import pytest_asyncio
 from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,7 +18,6 @@ from backend.lib.taint_propagation import (
 )
 from backend.models import Agent, Memory
 from backend.rules.checker import check_memory_rules
-from backend.rules.engine import PREDEFINED_RULES
 
 
 # ---------------------------------------------------------------------------

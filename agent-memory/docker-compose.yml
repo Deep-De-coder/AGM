@@ -1,26 +1,31 @@
+# Host ports can be overridden with POSTGRES_PORT / REDIS_PORT / API_PORT / FRONTEND_PORT
+# (shell env or a .env file next to this one), e.g. `API_PORT=8001 docker compose up --build`.
 services:
   postgres:
-    image: ankane/pgvector:latest
+    image: pgvector/pgvector:pg15
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: agentmemory
     ports:
-      - "5432:5432"
+      # Loopback only: these default credentials should never face the network.
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      # TCP, not the socket: the first-boot init server is socket-only and would
+      # otherwise report ready before the real server starts.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres -d agentmemory"]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
     networks:
       - appnet
 
   redis:
     image: redis:7-alpine
     ports:
-      - "6379:6379"
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -37,7 +42,7 @@ services:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/agentmemory
       REDIS_URL: redis://redis:6379/0
     ports:
-      - "8000:8000"
+      - "${API_PORT:-8000}:8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -57,9 +62,11 @@ services:
       context: .
       dockerfile: Dockerfile.frontend
       args:
-        VITE_API_URL: http://localhost:8000
+        # Relative: nginx in this container proxies /api/* to the api service, so the
+        # dashboard works from any hostname or port, not only http://localhost:3000.
+        VITE_API_URL: /api
     ports:
-      - "3000:80"
+      - "${FRONTEND_PORT:-3000}:80"
     depends_on:
       api:
         condition: service_healthy

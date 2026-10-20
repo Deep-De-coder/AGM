@@ -12,7 +12,6 @@ the benchmark standalone and consult the full report.
 
 from __future__ import annotations
 
-import asyncio
 
 import pytest
 

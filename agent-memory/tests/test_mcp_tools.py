@@ -6,6 +6,8 @@ Run with:
   pip install -e ".[test]"
   pytest tests/test_mcp_tools.py -v
 """
+import json
+
 import pytest
 import respx
 import httpx
@@ -25,9 +27,9 @@ def client():
 async def test_write_memory_success(client):
     respx.post(f"{MOCK_API}/memories").mock(
         return_value=httpx.Response(201, json={
-            "id": "mem-123",
+            "memory_id": "mem-123",
             "trust_score": 0.9,
-            "memory_state": "active",
+            "created_at": "2026-01-01T00:00:00Z",
             "content_hash": "abc123",
             "rules_check": "pending"
         })
@@ -44,22 +46,18 @@ async def test_write_memory_success(client):
             "context_hash": "ctx-hash-1"
         }
     )
-    assert result["id"] == "mem-123"
+    assert result["memory_id"] == "mem-123"
     assert result["trust_score"] == 0.9
-    assert result["memory_state"] == "active"
 
 
 @pytest.mark.asyncio
 @respx.mock
 async def test_get_safe_memories_returns_list(client):
     respx.get(f"{MOCK_API}/memories/safe").mock(
-        return_value=httpx.Response(200, json={
-            "memories": [],
-            "total": 0
-        })
+        return_value=httpx.Response(200, json=[])
     )
     result = await client.get_safe_memories(agent_id="agent-1")
-    assert "memories" in result
+    assert result == []
 
 
 @pytest.mark.asyncio
@@ -79,11 +77,11 @@ async def test_get_rules_reference_embedded_requires_no_api(client):
     It is embedded in the package — no network needed.
     """
     result = await client.get_rules_reference()
-    assert result["total"] == 13
+    assert result["total"] == len(result["rules"]) == 15
     assert result["source"] == "embedded"
     rule_ids = [r["id"] for r in result["rules"]]
     assert "RULE_001" in rule_ids
-    assert "RULE_013" in rule_ids
+    assert "RULE_015" in rule_ids
     severities = [r["severity"] for r in result["rules"]]
     assert "CRITICAL" in severities
     assert "HIGH" in severities
@@ -104,7 +102,7 @@ async def test_register_agent_returns_agent_id(client):
         metadata={"version": "1.0"},
         system_prompt_hash="sha256-abc"
     )
-    assert result["id"] == "agent-uuid-123"
+    assert result["agent_id"] == "agent-uuid-123"
     assert result["name"] == "TestAgent"
 
 
@@ -169,14 +167,14 @@ async def test_get_trust_score(client):
 @respx.mock
 async def test_write_memory_inter_agent_starts_anergic(client):
     """
-    Inter-agent memories must start anergic.
-    Verify the response reflects this.
+    Inter-agent memories start anergic server-side; the write response does not
+    carry memory_state, so verify the client sends source_type=inter_agent.
     """
-    respx.post(f"{MOCK_API}/memories").mock(
+    route = respx.post(f"{MOCK_API}/memories").mock(
         return_value=httpx.Response(201, json={
-            "id": "mem-456",
+            "memory_id": "mem-456",
             "trust_score": 0.5,
-            "memory_state": "anergic",
+            "created_at": "2026-01-01T00:00:00Z",
             "content_hash": "def456",
             "rules_check": "pending"
         })
@@ -193,4 +191,6 @@ async def test_write_memory_inter_agent_starts_anergic(client):
             "context_hash": "ctx-hash-2"
         }
     )
-    assert result["memory_state"] == "anergic"
+    sent = json.loads(route.calls.last.request.content)
+    assert sent["source_type"] == "inter_agent"
+    assert result["memory_id"] == "mem-456"

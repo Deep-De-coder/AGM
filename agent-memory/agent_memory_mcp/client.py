@@ -284,7 +284,7 @@ class AgentMemoryClient:
 
     async def get_rules_reference(self) -> dict[str, Any]:
         """
-        Returns the static reference list of all 13 detection rules.
+        Returns the static reference list of all 15 detection rules.
         This is embedded in the MCP package — no API call needed.
         """
         return {

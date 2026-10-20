@@ -3,6 +3,14 @@
 All notable changes to `agm-memory-mcp` are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.1.3] — unreleased
+
+### Fixed
+- Pin `mcp<2`: MCP SDK 2.x renamed `FastMCP`, so 0.1.2 crashed on startup
+  (`No module named 'mcp.server.fastmcp'`) on any fresh install.
+- Package builds again with current setuptools (removed the legacy license
+  classifier that PEP 639 rejects alongside `license = "MIT"`).
+
 ## [0.1.0] — 2026-04-09
 
 ### Added
