@@ -349,6 +349,8 @@ A Vickrey-Clarke-Groves mechanism could replace the current fixed-threshold corr
 
 **DCA context is stale within a burst.** `get_agent_context` returns the cached sample (60 s TTL) taken at the agent's first write, so a burst of writes shorter than a minute is judged on pre-burst behavior.
 
+**Anergic memories are never released.** `promote_anergic_memories` needs `corroboration` provenance events from 3+ trusted agents, but no endpoint, MCP tool or background job writes them, so every anergic memory (including every inter-agent write) stays out of safe retrieval.
+
 **Consolidated memories are not write-locked, and contradiction quarantine is inactive.** No code path treats `consolidated` specially after the transition. `quarantine_contradicting_memories` only considers memories with an `embedding`, and nothing in the API writes embeddings, so the ANERGIC → QUARANTINED transition never fires.
 
 **`POST /memories/{id}/flag` has no authorization.** Any caller can flag any memory, halving its trust (`source_reliability_factor` 0.5).

@@ -73,7 +73,7 @@ Multi-agent AI pipelines inherit a fundamental flaw from classical identity-base
 
 5. **Quorum Trust** — Fast, medium, and slow timescale signals must independently converge; quorum failure suppresses the trust multiplier toward zero. *(T-cell co-stimulation: a single signal alone induces anergy, not activation)*
 
-6. **Two-Signal Anergy** — Memories without corroboration enter `anergic` state and are excluded from safe-memory queries; requires 3+ trusted-agent confirmations to promote back to `active`. *(Clonal anergy: autoreactive lymphocytes silenced until a second co-stimulatory signal arrives)*
+6. **Two-Signal Anergy** — Memories without corroboration enter `anergic` state and are excluded from safe-memory queries; designed to promote back to `active` after 3+ trusted-agent confirmations, but no API path records confirmations yet, so they currently stay held back. *(Clonal anergy: autoreactive lymphocytes silenced until a second co-stimulatory signal arrives)*
 
 7. **Reconsolidation Lock** — Write-locks a memory during retrieval to close the read-modify-write race window exploited by echo-chamber and injection attacks. *(Synaptic reconsolidation: memory is labile during recall and re-stabilizes before expression)*
 
@@ -307,7 +307,7 @@ docker compose exec api python backend/demo_simulation.py
 | 4 | **Temporal Phantom** | Memory claiming to follow from a session state that never existed | RULE_012 causal orphan | Detected (RULE_012 violation), not contained |
 | 5 | **Anergy Escape** | Three colluding agents fake corroboration to promote a quarantined memory | Two-signal anergy + RULE_013 | **Contained**: HTTP 403, memory stays `anergic` |
 | 6 | **Identity Ghost** | New identity mimics a legitimate agent and writes high-stakes memories | Quorum slow signal | Not contained |
-| 7 | **Consolidation Hijack** | Contradicts and forges a trusted agent's long-term memory | Content hash + RULE_003 | Not contained; forgery is detected by hash |
+| 7 | **Consolidation Hijack** | Contradicts and forges a trusted agent's long-term memory | Content hash + RULE_003 | Not contained; the attacker's flag halves the genuine memory's trust |
 
 ### Known gaps (why 5 attacks are not contained)
 
